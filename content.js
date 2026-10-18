@@ -2342,7 +2342,10 @@
     const outstanding = await readPending(itemId);
     if (outstanding) {
       toast(T('toast.resumingUnfinished'), 'bad');
-      return Boolean(await advancePending(itemId, outstanding, null, true));
+      // The same quiet seam as below: a resume nobody is watching must not
+      // put the size window in front of anyone — it stores the record and
+      // raises the recovery banner instead, exactly as a quiet run does.
+      return Boolean(await advancePending(itemId, outstanding, null, !hooks.quiet));
     }
 
     const draftOnly = mode === 'draft';
