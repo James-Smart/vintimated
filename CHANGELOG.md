@@ -1,9 +1,59 @@
 # Changelog
 
-All notable changes to Bumpline are documented in this file.
+All notable changes to Vintimated are documented in this file. Entries up to
+and including 1.1.4 are Bumpline's, the project Vintimated was forked from.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.2.0] - 2026-10-18
+
+The first release of the fork, and with it the two things the fork was made
+for: relisting more than one item at a time, and photos that never go up the
+same twice. Everything a seller knew from Bumpline's one-click relist is
+still here — copy before delete, the recovery box, the pacing that stays on —
+now driving a paced walk of as many items as you pick instead of a single
+button.
+
+Vintimated is a fork of Bumpline 1.1.4 by
+[g1ampy](https://github.com/g1ampy/Bumpline), Copyright (C) 2026 g1ampy,
+licensed under the GNU General Public License v3.0. Upstream's copyright
+headers are preserved in every source file; Vintimated's changes are marked
+`Modifications Copyright (C) 2026 Vintimated contributors.` and are
+distributed under the same license.
+
+### Added
+
+- **Bulk relist.** On your own wardrobe page every relistable item gets a
+  checkbox, and a bar along the bottom offers *Select loaded*, *Clear*,
+  *Relist selected (N)*, *Relist all* and *Stop*. Selected items run through
+  the same safe relist sequence one at a time, 10–30 seconds apart on top of
+  the normal cooldowns. *Relist all* reads every active listing through
+  Vinted's API a page at a time — sold and reserved items are never queued —
+  and falls back to the cards on screen if the API's shape has changed. One
+  confirmation with the count is asked before anything runs; the volume
+  warning is a second question only when the run would cross 4 relists an
+  hour or 15 a day. A Vinted refusal (429 or bot challenge) halts the queue
+  with the items not yet relisted untouched, and *Stop* finishes the item in
+  hand before halting the same way. The page reloads once at the end, in
+  step with the existing reload setting.
+- **Photo refresh.** A new setting, *Refresh the photos on upload*
+  (`vintimated:photoRefresh`), with three modes: `off` leaves the bytes
+  unchanged; `stealth` applies invisible transforms — a random rotation of
+  up to about 1.2° with a cover-fill re-crop, a per-channel colour nudge,
+  low-amplitude pixel noise and a clean JPEG re-encode that strips the
+  metadata; `bordered` (the default) adds a thin white border, about 1–2% of
+  the photo's short edge, on top of the same transforms. The refreshed bytes
+  are what Vinted receives, while the recovery copy kept in the browser holds
+  the original bytes. A photo that fails to transform falls back to its
+  original bytes silently: a relist never fails over a photo.
+
+### Changed
+
+- **The extension is now Vintimated.** The fork carries a new name and
+  identity; its settings are its own and start at their defaults rather than
+  reading any Bumpline installation's storage (`bumpline:*` keys become
+  `vintimated:*`).
 
 ## [1.1.4] - 2026-09-11
 
