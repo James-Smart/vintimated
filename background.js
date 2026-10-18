@@ -335,8 +335,8 @@ Promise.resolve(ext.runtime.setUninstallURL(SITE + '/issues'))
 // null there:
 //
 //   vintimated:schedule.start    { defn }  -> { state, defn, tabId }  begin a run
-//   vintimated:schedule.stop               -> { state, defn, tabId }  end the period
-//   vintimated:schedule.abort              -> { state, defn, tabId }  cancel the run
+//   vintimated:schedule.stop               -> { state, defn, tabId }  end the period (after a relist in hand)
+//   vintimated:schedule.abort              -> { state, defn, tabId }  cancel the run at once
 //   vintimated:schedule.status             -> { state, defn, tabId }  just the books
 //
 // The fifth, vintimated:schedule.wake, only ever goes out: it is the alarm's
@@ -350,6 +350,21 @@ Promise.resolve(ext.runtime.setUninstallURL(SITE + '/issues'))
 const SCHEDULE_KEY = 'vintimated:schedule';
 const SCHEDULE_LEASE_KEY = 'vintimated:schedule.lease';
 const WAKE_ALARM = 'vintimated:schedule-wake';
+
+// Two markers shared with the engine around a relist. 'working' is the
+// engine's word that a runRelist is in flight in a named tab ({ tabId, at }) —
+// the one thing this worker cannot see for itself, and what a polite Stop
+// waits behind. 'pendingEnd' is this worker's own note that an ending is
+// parked behind such a relist ('stop'), honoured by the engine the moment its
+// relist settles.
+const SCHEDULE_WORKING_KEY = 'vintimated:schedule.working';
+const SCHEDULE_PENDING_KEY = 'vintimated:schedule.pendingEnd';
+
+// Provenance of the engine tab: the tab the engine OPENED for the run, as
+// opposed to one it adopted from the seller's own browsing. The opened tab is
+// ours to close when the run is over; an adopted one is only lent to the run
+// and is never closed or left worse than found.
+const SCHEDULE_ENGINE_TAB_KEY = 'vintimated:schedule.engineTab';
 
 // The wardrobe a run calls home: the profile the content script last found
 // the seller's own buttons on. The same key, the same address and the same
@@ -415,9 +430,10 @@ ext.alarms.onAlarm.addListener(alarm => {
 // the floor with — so there is one answer to "which tab is the engine" and it
 // survives the worker being torn down between knocks. The tab is pinned to
 // the wardrobe: a wake that finds it somewhere else puts it back on the
-// remembered profile. It is closed for good when the run leaves 'running' —
-// stop, abort or a period that ran out — or when the extension is switched
-// off (closeEngineTab below).
+// remembered profile. When the run leaves 'running' — stop, abort or a period
+// that ran out — or the extension is switched off, only a tab this worker
+// OPENED is closed (closeEngineTab below); an adopted tab is the seller's own
+// and only stops being the engine.
 
 // On the wardrobe when on a Vinted member page — exactly the pages the
 // content script is injected into, where currentMemberId() and the
@@ -458,7 +474,8 @@ async function ensureEngineTab() {
     // there — or open the remembered profile to be one. Quietly: the tab is
     // the scheduler's engine room, not something the seller asked to see.
     const [adopted] = await ext.tabs.query({ url: WARDROBE_URL_PATTERNS });
-    tab = adopted || (home ? await ext.tabs.create({ url: home, active: false }) : null);
+    const opened = !adopted && home ? await ext.tabs.create({ url: home, active: false }) : null;
+    tab = adopted || opened;
     if (tab && tab.id != null) {
       // Named from the first moment, so a run stopped ten seconds after it
       // started still knows which tab to close. The tab then renews the claim
@@ -466,6 +483,11 @@ async function ensureEngineTab() {
       await ext.storage.local.set({
         [SCHEDULE_LEASE_KEY]: Scheduler.renewLease(Date.now(), tab.id),
       });
+      // Provenance: a tab we opened is ours to close at the end of the run;
+      // an adopted one is the seller's, only lent to it.
+      if (opened) {
+        await ext.storage.local.set({ [SCHEDULE_ENGINE_TAB_KEY]: opened.id });
+      }
     }
     return tab;
   } catch (err) {
@@ -474,22 +496,68 @@ async function ensureEngineTab() {
   }
 }
 
-// The engine tab, closed for good: the run has left 'running', or the
-// extension is switched off. The claim goes with it — a tab that is gone must
-// not go on naming itself the engine — so a later start begins the dance
-// again.
+// The engine tab at the end of the run — and only ever the tab the engine
+// OPENED. Provenance is the whole difference: a tab adopted from the seller's
+// own browsing is never closed and never dragged about (the lease is simply
+// dropped and the tab stops being the engine), while a tab this worker opened
+// is ours to close when the state leaves 'running' or the extension is
+// switched off. A seller who closed the engine tab mid-run has already tidied
+// up for us: the record names a tab that is gone and closes nothing.
 async function closeEngineTab() {
   try {
-    const bag = await ext.storage.local.get([SCHEDULE_LEASE_KEY]);
-    const lease = bag[SCHEDULE_LEASE_KEY];
-    await ext.storage.local.remove(SCHEDULE_LEASE_KEY);
-    if (lease && lease.tabId != null) {
+    const bag = await ext.storage.local.get([SCHEDULE_LEASE_KEY, SCHEDULE_ENGINE_TAB_KEY]);
+    await ext.storage.local.remove([SCHEDULE_LEASE_KEY, SCHEDULE_ENGINE_TAB_KEY]);
+    const ours = bag[SCHEDULE_ENGINE_TAB_KEY];
+    if (ours != null) {
       // A tab already gone is not a failure worth more than a debug line.
-      Promise.resolve(ext.tabs.remove(lease.tabId))
+      Promise.resolve(ext.tabs.remove(ours))
         .catch(err => console.debug('[Vintimated] could not close the engine tab', err));
     }
   } catch (err) {
     console.debug('[Vintimated] could not close the schedule engine tab', err);
+  }
+}
+
+// Is a scheduled relist in flight? The engine's marker says so while its tab
+// lives and its minutes are few. A marker whose tab is gone, or old beyond any
+// relist's own few minutes (one hard-cooldown inside a relist is ten seconds),
+// is a ghost — a content script that died inside a tab that did not — and
+// answers no, so an ending is never parked behind a relist that is not there.
+const WORKING_GHOST_MS = 15 * 60 * 1000;
+
+async function scheduleWorking() {
+  try {
+    const bag = await ext.storage.local.get([SCHEDULE_WORKING_KEY]);
+    const mark = bag[SCHEDULE_WORKING_KEY];
+    const alive = mark && mark.tabId != null && (await ext.tabs.get(mark.tabId).catch(() => null));
+    if (alive && Date.now() - mark.at < WORKING_GHOST_MS) return true;
+    await ext.storage.local.remove(SCHEDULE_WORKING_KEY);
+    return false;
+  } catch (err) {
+    console.debug('[Vintimated] could not read the relist in flight', err);
+    return false;
+  }
+}
+
+// The parked ending: written when a Stop waits behind a relist, cleared by
+// whatever ends the run — the engine coming back with the Stop it was
+// promised, or an Abort that cancels the wait outright.
+async function markPendingEnd(verb) {
+  try {
+    if (verb) await ext.storage.local.set({ [SCHEDULE_PENDING_KEY]: verb });
+    else await ext.storage.local.remove(SCHEDULE_PENDING_KEY);
+  } catch (err) {
+    console.debug('[Vintimated] could not note the schedule ending', err);
+  }
+}
+
+// Both markers down: the run is over, and nothing may go on waiting for a
+// relist or an ending that belonged to it.
+async function clearEngineMarkers() {
+  try {
+    await ext.storage.local.remove([SCHEDULE_WORKING_KEY, SCHEDULE_PENDING_KEY]);
+  } catch (err) {
+    console.debug('[Vintimated] could not clear the schedule markers', err);
   }
 }
 
@@ -544,15 +612,27 @@ async function scheduleStart(defn, sender) {
   return scheduleAnswer(state, sender);
 }
 
-// Stop and abort differ only in what the transition wipes — stop keeps the
-// period's books, abort clears them — so one handler carries both verbs. The
-// engine tab goes with either: the tab that held the floor held it for a run
-// that is over, and no wardrobe tab is left holding one (the period running
-// out reaches this same door, the engine asking for the stop on its own). A
-// stop or abort that finds no definition to act on writes nothing at all, so
-// the books only ever hold a state deserialize would believe.
+// Stop and abort are different in kind, not only in what they wipe. Stop is
+// polite — "the schedule ends after the relist in progress" — so a relist in
+// hand is let finish: the ending is parked behind it (pendingEnd) and comes
+// back through this same door the moment the engine settles it, the books
+// going on saying 'running' until then because that is what is true. Abort is
+// hard and cancels at once — "finishes nothing new" — with the copy-before-
+// delete and pending recovery already protecting whatever was mid-flight.
+// Either way the engine tab goes: the tab that held the floor held it for a
+// run that is over (the period running out reaches this same door, the engine
+// asking for the stop on its own). A stop or abort that finds no definition to
+// act on writes nothing at all, so the books only ever hold a state
+// deserialize would believe.
 async function scheduleEnd(verb, sender) {
   let state = await readSchedule();
+
+  if (verb === 'stop' && state.defn != null && (await scheduleWorking())) {
+    await markPendingEnd('stop');
+    return scheduleAnswer(state, sender);
+  }
+
+  await clearEngineMarkers();
   if (state.defn != null) {
     state = Scheduler.transition(state, { type: verb, now: Date.now() });
     await writeSchedule(state);

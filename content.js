@@ -3152,10 +3152,24 @@
   // holds and skips — nothing asked, nothing recorded — and the next wake
   // simply re-decides. The relist goes in with budgetPreapproved precisely
   // because that pre-check is the same arithmetic the gate would have done.
+  //
+  // Stop is polite and Abort is hard. A Stop during a firing waits for the
+  // relist in hand — "the schedule ends after the relist in progress" — and
+  // ends the run when it settles; an Abort cancels at once, with the
+  // copy-before-delete and pending recovery already protecting whatever was
+  // mid-flight.
   // ===========================================================================
 
   const SCHEDULE_KEY = 'vintimated:schedule';
   const SCHEDULE_LEASE_KEY = 'vintimated:schedule.lease';
+
+  // Two markers shared with the worker around a relist. 'working' is this
+  // tab's word that a runRelist is in flight ({ tabId, at }) — the one thing
+  // the worker cannot see for itself, and what a polite Stop waits behind.
+  // 'pendingEnd' is the worker's own note that an ending is parked behind
+  // such a relist, honoured here the moment the relist settles.
+  const SCHEDULE_WORKING_KEY = 'vintimated:schedule.working';
+  const SCHEDULE_PENDING_KEY = 'vintimated:schedule.pendingEnd';
 
   // The card a firing scrolls to, when the item is on this page at all.
   const engineCard = id => document.querySelector(`[data-testid="product-item-id-${id}"]`);
@@ -3183,6 +3197,19 @@
     }
   }
 
+  // The in-flight marker, up for the relist itself and no longer. A named tab
+  // answers "who is working"; null takes the marker back down. Storage is
+  // touched through try: an extension reloaded under the page throws where it
+  // is touched instead of rejecting.
+  async function noteWorking(tabId) {
+    try {
+      if (tabId == null) await ext.storage.local.remove(SCHEDULE_WORKING_KEY);
+      else await ext.storage.local.set({ [SCHEDULE_WORKING_KEY]: { tabId, at: Date.now() } });
+    } catch (err) {
+      trace('could not note the relist in flight', err);
+    }
+  }
+
   // One knock's worth of work — or one page load's; both ask the same
   // question at different moments. At most one relist comes out of it,
   // however long it has been since the last.
@@ -3204,6 +3231,14 @@
       // the asking tab because a content script cannot learn it alone.
       const { state, defn, tabId } = await askWorker({ type: 'vintimated:schedule.status' });
       if (!state || state.status !== 'running' || !defn || tabId == null) return;
+
+      // A Stop parked behind a relist that has since gone away is honoured
+      // here, before anything is asked about firing: the end goes through the
+      // worker's door, and no relist starts over it.
+      if ((await readSetting(SCHEDULE_PENDING_KEY, null)) != null) {
+        await askWorker({ type: 'vintimated:schedule.stop' });
+        return;
+      }
 
       // The floor. Only the tab the lease names goes on from here.
       if (!(await claimFloor(tabId))) {
@@ -3266,50 +3301,79 @@
         return;
       }
 
-      // Checked with leaseValid at the last possible moment: the pick's walk
-      // can take a while, and a tab that lost the floor in the meantime must
-      // not fire. Taking the claim again also renews it over the relist to
-      // come, so a busy engine never loses the floor mid-relist.
+      // At the last possible moment the books must still say 'running': a
+      // Stop or Abort that landed while the pick walked must not be fired
+      // over — nothing new starts once the run is ending. Read before the
+      // floor is touched, so an ended run never re-claims a claim its end
+      // already dropped.
+      const standing = Scheduler.deserialize(await readSetting(SCHEDULE_KEY, null));
+      if (standing.status !== 'running') {
+        trace('schedule: the run ended before the firing');
+        return;
+      }
+
+      // Checked with leaseValid at that same last moment: the pick's walk can
+      // take a while, and a tab that lost the floor in the meantime must not
+      // fire. Taking the claim again also renews it over the relist to come,
+      // so a busy engine never loses the floor mid-relist.
       const floor = await claimFloor(tabId);
       if (!floor || !Scheduler.leaseValid(floor, Date.now())) {
         trace('schedule: lost the floor before firing');
         return;
       }
 
-      const ok = await runRelist(id, 'publish', {
-        label: text => trace('schedule:', text),
-        busy: () => {},
-        card: () => engineCard(id),
-        reload: false,
-        budgetPreapproved: true,
-      });
-
-      // A relist that did not come through is recorded as nothing: no fire
-      // event, no done id, the gap left where it stands — so the next knock
-      // can simply try again.
-      if (!ok) {
-        trace('schedule: the relist of', id, 'did not finish; nothing recorded');
-        return;
+      // The marker goes up for the relist itself and no longer: it is what
+      // the worker reads as "a relist is in flight", and a polite Stop waits
+      // behind it rather than ending a run with work in hand.
+      await noteWorking(tabId);
+      let ok = false;
+      try {
+        ok = await runRelist(id, 'publish', {
+          label: text => trace('schedule:', text),
+          busy: () => {},
+          card: () => engineCard(id),
+          reload: false,
+          budgetPreapproved: true,
+        });
+      } finally {
+        await noteWorking(null);
       }
 
-      // --- the books. The gap is drawn once here and carried in the event,
-      // so no later decision can redraw the wait it is checking, and the
-      // state goes back where the background's alarm follows it.
-      const fired = Scheduler.transition(state, {
-        type: 'fire',
-        now: Date.now(),
-        id,
-        gapMs: Scheduler.nextGapMs(defn, Math.random),
-      });
-      try {
-        // Only a run still going is written over: a stop that landed while
-        // the relist was in hand must not be talked back into 'running'.
-        const current = await readSetting(SCHEDULE_KEY, null);
-        if (current && Scheduler.deserialize(current).status === 'running') {
-          await ext.storage.local.set({ [SCHEDULE_KEY]: Scheduler.serialize(fired) });
+      if (ok) {
+        // --- the books. The gap is drawn once here and carried in the event,
+        // so no later decision can redraw the wait it is checking, and the
+        // state goes back where the background's alarm follows it.
+        const fired = Scheduler.transition(state, {
+          type: 'fire',
+          now: Date.now(),
+          id,
+          gapMs: Scheduler.nextGapMs(defn, Math.random),
+        });
+        try {
+          // Only a run still going is written over: an ending that landed
+          // while the relist was in hand must not be talked back into
+          // 'running'.
+          const current = await readSetting(SCHEDULE_KEY, null);
+          if (current && Scheduler.deserialize(current).status === 'running') {
+            await ext.storage.local.set({ [SCHEDULE_KEY]: Scheduler.serialize(fired) });
+          }
+        } catch (err) {
+          trace('could not write the schedule', err);
         }
-      } catch (err) {
-        trace('could not write the schedule', err);
+      } else {
+        // A relist that did not come through is recorded as nothing: no fire
+        // event, no done id, the gap left where it stands — so the next knock
+        // can simply try again.
+        trace('schedule: the relist of', id, 'did not finish; nothing recorded');
+      }
+
+      // A Stop that parked behind this relist comes through now — after the
+      // fire is on the books when there is one, so "ends after the relist in
+      // progress" keeps the very relist it waited for. The end goes through
+      // the worker's door: it ends the books, drops the lease and closes the
+      // engine tab per their own rules.
+      if ((await readSetting(SCHEDULE_PENDING_KEY, null)) != null) {
+        await askWorker({ type: 'vintimated:schedule.stop' });
       }
     } catch (err) {
       trace('the schedule engine broke', err);
