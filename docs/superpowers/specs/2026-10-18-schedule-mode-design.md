@@ -19,10 +19,13 @@ for them, invisibly.
 
 1. **One-form scheduler.** Period, allowed days, allowed hours, daily cap,
    random gap range, item-age threshold, scope. Start / Stop / Abort.
-2. **Runs only while Vinted is open.** No background waking of a closed
-   browser; the scheduler lives in the wardrobe tab and does nothing when
-   the seller is not there. (Honest note: the extension can see an open
-   tab, not a human — the hours, gaps and caps are what keep it human.)
+2. **Runs only while the browser is open.** The scheduler owns one quiet
+   Vinted wardrobe tab of its own — opened when the schedule starts, closed
+   when it ends — and that tab is its engine room. The seller browses
+   anywhere, Vinted or not, and nothing depends on the pages they keep.
+   Browser shut means nothing runs. (Honest note: the extension can see an
+   open tab, not a human — the hours, gaps and caps are what keep it
+   human.)
 3. **Human pacing as a first-class setting.** Gaps drawn randomly from the
    configured range; nothing metronomic; nothing that bursts after idle.
 4. **Age threshold doubles as cadence.** Only items listed N+ days ago
@@ -85,8 +88,10 @@ for them, invisibly.
 - **Stop/Abort semantics:** Stop = end after the in-progress relist;
   Abort = also drop the queued plan. The running strip shows state, next
   relist ETA, today's count against the cap, and the end date.
-- **When it runs:** only while a Vinted tab is open in front of them; the
-  schedule exists to be invisible, not to work while they sleep.
+- **When it runs:** only while the browser is open, and without the seller
+  having to keep any page open or look after it — they said "should just
+  need browser open and should be able to browse about". The schedule
+  exists to be invisible, not to work while they sleep.
 
 ## My calls (builder may vary these)
 
@@ -117,6 +122,14 @@ for them, invisibly.
   satisfies the firing precondition; it need not be the visible tab. The
   agreed promise is "while Vinted is open", and demanding focus would
   under-deliver it. What Vinted observes is identical either way.
+- **The engine tab (builder check, answered by the seller).** Start opens
+  or adopts one wardrobe tab and the scheduler runs there; a storage lease
+  guarantees one firing scheduler across tabs. The tab stays on the
+  wardrobe, so `currentMemberId()` and the enumeration ladder keep their
+  footing; the seller's own tabs are never in the way. Background-tab
+  timer throttling is absorbed by re-checking the clock on every wake
+  rather than trusting one long timer. The tab closes when the schedule
+  ends, is aborted, or the extension is switched off.
 - **Abort/Stop mapped onto rolling eligibility (builder check).** The
   validated form text stands: Stop finishes the relist in progress and ends
   the schedule for its period; Abort finishes nothing new and cancels the
