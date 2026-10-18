@@ -267,6 +267,28 @@ test('transition: abort cancels the run, clearing counters and doneIds', () => {
   assert.deepEqual(cancelled.defn, d);
 });
 
+test('transition: start on a used state begins a clean run', () => {
+  const d = defn();
+  let state = Scheduler.transition(Scheduler.deserialize(null), { type: 'start', defn: d, now: ts(0, 18, 0) });
+  state = Scheduler.transition(state, { type: 'fire', now: ts(0, 18, 30), id: 'a', gapMs: 90000 });
+  state = Scheduler.transition(state, { type: 'stop', now: ts(0, 19, 0) });
+  assert.equal(state.status, 'ended');
+  assert.equal(state.dayCount, 1);
+  assert.deepEqual(state.doneIds, ['a']);
+
+  // A period is defined by its Start: whatever the last run recorded is
+  // wiped, and the new endsAt is measured from the new now.
+  const now = ts(7, 18, 0);
+  const fresh = Scheduler.transition(state, { type: 'start', defn: d, now });
+  assert.equal(fresh.status, 'running');
+  assert.deepEqual(fresh.doneIds, []);
+  assert.equal(fresh.dayCount, 0);
+  assert.equal(fresh.lastFireAt, null);
+  assert.equal(fresh.startedAt, now);
+  assert.equal(fresh.endsAt, now + d.periodMs);
+  assert.equal(fresh.nextDueAt, now);
+});
+
 test('transition: pause parks the run and resume lifts it', () => {
   const running = Scheduler.transition(Scheduler.deserialize(null), {
     type: 'start',
@@ -332,7 +354,25 @@ test('deserialize: anything malformed comes back as a fresh idle state', () => {
   assert.equal(idle.status, 'idle');
   assert.deepEqual(idle.doneIds, []);
 
-  for (const garbage of ['', '{oops', '42', 'null', '"hi"', '{"status":"chaos"}', '{"status":"running"}', undefined, 7, [1]]) {
+  // A state without a definition it can run is the wreck that matters:
+  // 'running' with defn missing or not a defn at all would leave a caller
+  // reading defn.days off nothing.
+  for (const garbage of [
+    '',
+    '{oops',
+    '42',
+    'null',
+    '"hi"',
+    '{"status":"chaos"}',
+    '{"status":"running"}',
+    '{"status":"running","doneIds":[]}',
+    '{"status":"running","doneIds":[],"defn":7}',
+    '{"status":"running","doneIds":[],"defn":null}',
+    '{"status":"idle","doneIds":[],"defn":7}',
+    undefined,
+    7,
+    [1],
+  ]) {
     assert.deepEqual(Scheduler.deserialize(garbage), idle);
   }
 });

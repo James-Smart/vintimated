@@ -216,9 +216,9 @@ const Scheduler = (() => {
 
   // A state through JSON and back, for a run that has to survive being put
   // down. Anything that does not parse into a state — no status worth the
-  // name, no ids to speak of — comes back as a fresh idle one instead of a
-  // half-believable wreck; deserialize(null) is also simply where a new run
-  // gets its first state.
+  // name, no ids to speak of, no definition to run — comes back as a fresh
+  // idle one instead of a half-believable wreck; deserialize(null) is also
+  // simply where a new run gets its first state.
   function serialize(state) {
     return JSON.stringify(state);
   }
@@ -235,6 +235,13 @@ const Scheduler = (() => {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return idleState();
     if (!STATUSES.includes(parsed.status)) return idleState();
     if (!Array.isArray(parsed.doneIds)) return idleState();
+    // A state is only believable alongside the definition it runs — a caller
+    // reads defn.days off this — so a defn that is present must be a real
+    // one, and only idle may carry none at all. Anything less is the
+    // half-state that would come back runnable and read as a crash.
+    const hasDefn = parsed.defn != null && typeof parsed.defn === 'object' && !Array.isArray(parsed.defn);
+    const defnOk = hasDefn || (parsed.status === 'idle' && parsed.defn == null);
+    if (!defnOk) return idleState();
     return { ...idleState(), ...parsed };
   }
 
