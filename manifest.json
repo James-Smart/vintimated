@@ -23,7 +23,8 @@
   },
   "permissions": [
     "storage",
-    "webRequest"
+    "webRequest",
+    "alarms"
   ],
   "host_permissions": [
     "https://www.vinted.at/*",
@@ -134,6 +135,7 @@
         "strings.js",
         "photo-refresh.js",
         "bulk-queue.js",
+        "scheduler.js",
         "content.js"
       ],
       "run_at": "document_idle"

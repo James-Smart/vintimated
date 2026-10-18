@@ -16,20 +16,25 @@
 // with this program. If not, see <https://www.gnu.org/licenses/>.
 
 // The background — a service worker on Chrome, an event page on Firefox —
-// exists for two jobs the page cannot do on its own:
+// exists for three jobs the page cannot do on its own:
 //
 //   1. Watch the requests Vinted's own site makes and note the security tokens
 //      it attaches, so the extension can send requests Vinted will accept.
 //   2. Fetch image bytes from the CDN when a cross-origin read from the page is
 //      refused.
+//   3. Keep a scheduled run of relists alive: its books in storage, a lease
+//      naming the one tab that may act on them, and a one-minute alarm that
+//      knocks on the wardrobe tabs.
 
-// The words for the one thing this file puts on screen: the toolbar button's
-// tooltip. Chrome's background is a classic service worker, which brings its
+// Two dependencies, both plain scripts: strings.js holds the words for the one
+// thing this file puts on screen — the toolbar button's tooltip — and
+// scheduler.js holds the arithmetic the schedule's wake wire asks for.
+// Chrome's background is a classic service worker, which brings its
 // own dependencies in with importScripts. Firefox's is an event page, where the
-// manifest lists strings.js ahead of this file — build.mjs writes that array —
+// manifest lists both ahead of this file — build.mjs writes that array —
 // and importScripts does not exist at all. Asking which of the two this is
 // covers both without either needing to know about the other.
-if (typeof importScripts === 'function') importScripts('strings.js');
+if (typeof importScripts === 'function') importScripts('strings.js', 'scheduler.js');
 
 // Firefox answers to `browser` and only that namespace returns promises there;
 // Chrome answers to `chrome`. One alias, and the rest of the file is written
@@ -309,3 +314,214 @@ ext.runtime.onInstalled.addListener(details => {
 // the address is then right however the worker came up.
 Promise.resolve(ext.runtime.setUninstallURL(SITE + '/issues'))
   .catch(err => console.debug('[Vintimated] could not set the uninstall page', err));
+
+// --- the schedule: persistence, the lease, the wake wire -------------------
+
+// A schedule of relists needs three things from outside the page it runs on:
+// books that survive being put down, one tab at a time allowed to act on
+// them, and a knock on the door while the seller is off browsing somewhere
+// else. That is all this section is. The books are a state the Scheduler has
+// already decided on, the lease is five minutes of belief in one tab, and the
+// knock is the cheapest thing a worker can be asked to do — post a message to
+// the wardrobe tabs and go back to sleep. Nothing here relists anything or
+// decides whether to: a knock is only ever a knock.
+//
+// Five message types join the relay above. The four that come in are each
+// answered with the same two things — the state as it now stands and the
+// definition it runs, lifted out beside it for callers that only want the
+// settings:
+//
+//   vintimated:schedule.start    { defn }  -> { state, defn }  begin a run
+//   vintimated:schedule.stop               -> { state, defn }  end the period
+//   vintimated:schedule.abort              -> { state, defn }  cancel the run
+//   vintimated:schedule.status             -> { state, defn }  just the books
+//
+// The fifth, vintimated:schedule.wake, only ever goes out: it is the alarm's
+// knock on a wardrobe tab, and the tab that hears it — the engine, in
+// content.js — decides what a knock means.
+
+// The books. The state travels as Scheduler serializes it, so a run survives
+// a worker being torn down between one firing and the next; the lease beside
+// it is the claim one tab holds on the run — { tabId, until } — renewed five
+// minutes ahead by the engine tab and dropped the moment the run is over.
+const SCHEDULE_KEY = 'vintimated:schedule';
+const SCHEDULE_LEASE_KEY = 'vintimated:schedule.lease';
+const WAKE_ALARM = 'vintimated:schedule-wake';
+
+// The wardrobe a run calls home: the profile the content script last found
+// the seller's own buttons on. The same key, the same address and the same
+// meaning as in popup.js and content.js.
+const LAST_PROFILE_KEY = 'vintimated:lastProfile';
+
+// Where a knock can land: exactly the pages the content script is injected
+// into — the manifest's /member/* matches — one pattern per country domain.
+const WARDROBE_URL_PATTERNS = COUNTRY_DOMAINS.map(domain => `https://www.${domain}/member/*`);
+
+// The alarm lives exactly as long as the books say a run is going: created
+// when it is missing and the state is running, cleared when it is there and
+// the state is anything else. It is deliberately not re-created on every
+// look — a create replaces, and replacing a one-minute alarm on every worker
+// wake would keep shoving the next knock out of reach on a busy browsing day.
+async function syncScheduleAlarm() {
+  try {
+    const bag = await ext.storage.local.get([SCHEDULE_KEY]);
+    const running = Scheduler.deserialize(bag[SCHEDULE_KEY]).status === 'running';
+    const alarm = await ext.alarms.get(WAKE_ALARM);
+    if (running && !alarm) {
+      Promise.resolve(ext.alarms.create(WAKE_ALARM, { periodInMinutes: 1 }))
+        .catch(err => console.debug('[Vintimated] could not set the schedule alarm', err));
+    } else if (!running && alarm) {
+      await ext.alarms.clear(WAKE_ALARM);
+    }
+  } catch (err) {
+    console.debug('[Vintimated] could not read the schedule state', err);
+  }
+}
+
+// The whole of what a knock is: say `vintimated:schedule.wake` to every open
+// wardrobe tab. No reading the books, no relisting, no deciding — those
+// belong to the tab that hears it, which knows whether it holds the lease and
+// what the schedule wants next. Several tabs may hear the same knock; the
+// lease is what keeps the schedule from being run twice over.
+function wakeWardrobeTabs() {
+  Promise.resolve(ext.tabs.query({ url: WARDROBE_URL_PATTERNS }))
+    .then(tabs => {
+      for (const tab of tabs) {
+        if (tab.id == null) continue;
+        Promise.resolve(ext.tabs.sendMessage(tab.id, { type: 'vintimated:schedule.wake' }))
+          // A wardrobe tab whose content script never came up, or has gone
+          // away again, is simply not home.
+          .catch(() => {});
+      }
+    })
+    .catch(err => console.debug('[Vintimated] could not look for wardrobe tabs', err));
+}
+
+ext.alarms.onAlarm.addListener(alarm => {
+  if (!alarm || alarm.name !== WAKE_ALARM) return;
+  wakeWardrobeTabs();
+});
+
+// TASK 4 HOOK — the engine tab. A run needs one wardrobe tab to live in, and
+// the whole dance — adopt the wardrobe tab that is open or open the remembered
+// profile, keep the tab on the wardrobe, close it when the run is over — is
+// Task 4's to write. Until then this is the smallest honest version: a
+// wardrobe tab already open is the engine tab, and where there is none the
+// remembered profile is opened to be one.
+async function ensureEngineTab() {
+  try {
+    const tabs = await ext.tabs.query({ url: WARDROBE_URL_PATTERNS });
+    if (tabs.length) return;
+    const bag = await ext.storage.local.get([LAST_PROFILE_KEY]);
+    if (bag[LAST_PROFILE_KEY]) await ext.tabs.create({ url: bag[LAST_PROFILE_KEY] });
+  } catch (err) {
+    console.debug('[Vintimated] could not give the schedule its engine tab', err);
+  }
+}
+
+// The books through one door, so a storage failure costs a caller an answer
+// at the last believable state rather than a reply that never comes.
+async function readSchedule() {
+  try {
+    const bag = await ext.storage.local.get([SCHEDULE_KEY]);
+    return Scheduler.deserialize(bag[SCHEDULE_KEY]);
+  } catch (err) {
+    console.debug('[Vintimated] could not read the schedule', err);
+    return Scheduler.deserialize(null);
+  }
+}
+
+async function writeSchedule(state) {
+  try {
+    await ext.storage.local.set({ [SCHEDULE_KEY]: Scheduler.serialize(state) });
+  } catch (err) {
+    console.debug('[Vintimated] could not write the schedule', err);
+  }
+}
+
+// Every answer, the same shape.
+function scheduleAnswer(state) {
+  return { state, defn: state.defn };
+}
+
+async function scheduleStatus() {
+  return scheduleAnswer(await readSchedule());
+}
+
+// A start is the form's defn turned into a run: the state machine draws the
+// period from now, and the alarm and the engine tab follow the books. A start
+// that lands on a running schedule begins the clean run transition defines —
+// one alarm, one tab, never two of either.
+async function scheduleStart(defn) {
+  // A message that carries no definition is not a start: the caller gets the
+  // books back and no run is invented out of a malformed message.
+  if (!defn || typeof defn !== 'object' || Array.isArray(defn)) return scheduleStatus();
+  const state = Scheduler.transition(await readSchedule(), {
+    type: 'start',
+    defn,
+    now: Date.now(),
+  });
+  await writeSchedule(state);
+  await syncScheduleAlarm();
+  await ensureEngineTab();
+  return scheduleAnswer(state);
+}
+
+// Stop and abort differ only in what the transition wipes — stop keeps the
+// period's books, abort clears them — so one handler carries both verbs. The
+// lease goes with either: the tab that held the floor held it for a run that
+// is over. A stop or abort that finds no definition to act on writes nothing
+// at all, so the books only ever hold a state deserialize would believe.
+async function scheduleEnd(verb) {
+  let state = await readSchedule();
+  if (state.defn != null) {
+    state = Scheduler.transition(state, { type: verb, now: Date.now() });
+    await writeSchedule(state);
+  }
+  try {
+    await ext.storage.local.remove(SCHEDULE_LEASE_KEY);
+  } catch (err) {
+    console.debug('[Vintimated] could not drop the schedule lease', err);
+  }
+  await syncScheduleAlarm();
+  return scheduleAnswer(state);
+}
+
+ext.runtime.onMessage.addListener((message, _sender, respond) => {
+  if (!message || !message.type) return false;
+
+  if (message.type === 'vintimated:schedule.start') {
+    scheduleStart(message.defn).then(respond);
+    return true; // the reply is asynchronous
+  }
+
+  if (message.type === 'vintimated:schedule.stop') {
+    scheduleEnd('stop').then(respond);
+    return true;
+  }
+
+  if (message.type === 'vintimated:schedule.abort') {
+    scheduleEnd('abort').then(respond);
+    return true;
+  }
+
+  if (message.type === 'vintimated:schedule.status') {
+    scheduleStatus().then(respond);
+    return true;
+  }
+
+  return false;
+});
+
+// The engine tab writes the books as it works, and the alarm follows the
+// state rather than whoever last asked for something: a worker torn down
+// between a firing and its consequence comes back to the same truth.
+ext.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes) return;
+  if (SCHEDULE_KEY in changes) syncScheduleAlarm();
+});
+
+// And on the way up, because an alarm survives a browser restart but not a
+// reload or an update of the extension, and the books may say running either
+// way.
+syncScheduleAlarm();

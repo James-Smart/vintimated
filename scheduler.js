@@ -145,6 +145,16 @@ const Scheduler = (() => {
     return lease != null && now < lease.until;
   }
 
+  // A claim on the run, renewed ahead of its own expiry by the tab doing the
+  // work. Five minutes: long enough that a busy engine never loses the floor
+  // mid-relist, short enough that a tab that went away stops holding up the
+  // next one before the seller has finished wondering why nothing moves.
+  const LEASE_MS = 5 * 60 * 1000;
+
+  function renewLease(now, tabId) {
+    return { tabId, until: now + LEASE_MS };
+  }
+
   // The books of a run: what it is running, until when, when it last fired,
   // when it may fire again, which local day the count belongs to and how many
   // it has spent, and the ids it has already touched. pausedUntil rides along
@@ -255,6 +265,7 @@ const Scheduler = (() => {
     transition,
     dayKey,
     leaseValid,
+    renewLease,
     serialize,
     deserialize,
   };

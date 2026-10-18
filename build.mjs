@@ -45,6 +45,9 @@ const PAYLOAD = [
   // The bulk queue state machine, loaded before content.js the way the
   // manifest loads it.
   'bulk-queue.js',
+  // The schedule core, loaded before content.js the way the manifest loads
+  // it — and before background.js the way the Firefox build lists it.
+  'scheduler.js',
   'content.js',
   'popup.html',
   'popup.css',
@@ -95,11 +98,13 @@ const TARGETS = {
     // Firefox has no service worker to give: an MV3 background there is an
     // event page, woken by the same listeners and torn down the same way.
     //
-    // strings.js comes first because an event page has no importScripts, which
-    // is how the Chrome worker pulls the catalogue in. Here the order of this
-    // array is the whole loading mechanism: background.js paints the toolbar
-    // tooltip on the way up and needs VintimatedText to already be there.
-    out.background = { scripts: ['strings.js', 'background.js'] };
+    // strings.js and scheduler.js come first because an event page has no
+    // importScripts, which is how the Chrome worker pulls its dependencies
+    // in. Here the order of this array is the whole loading mechanism:
+    // background.js paints the toolbar tooltip on the way up and needs
+    // VintimatedText to already be there, and reads the schedule's books
+    // through Scheduler before the first knock is due.
+    out.background = { scripts: ['strings.js', 'scheduler.js', 'background.js'] };
 
     out.browser_specific_settings = {
       gecko: {

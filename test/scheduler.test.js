@@ -337,6 +337,29 @@ test('leaseValid: alive before until, spent at it', () => {
   assert.equal(Scheduler.leaseValid(lease, ts(0, 19, 1)), false);
 });
 
+test('renewLease: exactly five minutes of belief, named for the tab', () => {
+  const now = ts(0, 18, 0);
+  // The whole shape is pinned: the tab id passes through untouched — 0
+  // included, a tab id like any other — and until is now plus exactly five
+  // minutes, not a rounder number either side.
+  assert.deepEqual(Scheduler.renewLease(now, 7), { tabId: 7, until: now + 5 * 60 * 1000 });
+  assert.deepEqual(Scheduler.renewLease(now, 0), { tabId: 0, until: now + 5 * 60 * 1000 });
+  assert.equal(Scheduler.renewLease(now, 7).until - now, 5 * 60 * 1000);
+});
+
+test('renewLease: a renewed lease is believed to its minute, stale after', () => {
+  const now = ts(0, 18, 0);
+  const lease = Scheduler.renewLease(now, 7);
+  assert.equal(Scheduler.leaseValid(lease, now), true);
+  assert.equal(Scheduler.leaseValid(lease, now + 5 * 60 * 1000 - 1), true);
+  assert.equal(Scheduler.leaseValid(lease, now + 5 * 60 * 1000), false);
+  assert.equal(Scheduler.leaseValid(lease, now + 5 * 60 * 1000 + 1), false);
+  // A tab that went away leaves its lease to expire on its own; nothing
+  // revives it but renewLease itself.
+  const gone = Scheduler.renewLease(now - 5 * 60 * 1000, 7);
+  assert.equal(Scheduler.leaseValid(gone, now), false);
+});
+
 test('serialize/deserialize: a state survives the round trip unchanged', () => {
   let state = Scheduler.transition(Scheduler.deserialize(null), {
     type: 'start',
