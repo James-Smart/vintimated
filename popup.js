@@ -208,7 +208,7 @@ const countWithin = (log, window) => {
   return log.filter(at => at > cutoff).length;
 };
 
-// BumplineText.locale(), not []: [] is the browser's locale, which is the wrong
+// VintimatedText.locale(), not []: [] is the browser's locale, which is the wrong
 // one the moment the seller has overruled it, and the same instant would then be
 // written one way here and another way on the Vinted page. content.js formats
 // its clock from the same source for the same reason.
@@ -302,7 +302,7 @@ async function readStored() {
     enabled: bag[ENABLED_KEY] !== false,
     relists: recentRelists(bag[RELIST_LOG_KEY]),
     paused: standingPause(bag[BLOCK_KEY]),
-    // 'auto' is a stored value here too, and BumplineText.use already knows
+    // 'auto' is a stored value here too, and VintimatedText.use already knows
     // what to do with it: ask the browser. Anything this panel does not offer
     // — a key written by a later version and then rolled back, a hand-edited
     // storage — is read as 'auto' rather than passed through. use() would fall
@@ -791,7 +791,7 @@ function wireLanguage(stored, repaint, paintCount) {
     VintimatedText.paint();
     paint();
     paintCount();
-    // BumplineText.paint() has just rewritten every [data-i18n] node straight
+    // VintimatedText.paint() has just rewritten every [data-i18n] node straight
     // from the catalogue, and four of those nodes do not belong to it: the
     // status title and detail, the paused title, and the lift button were all
     // filled by script with text worked out from this tab and this record.

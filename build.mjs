@@ -92,7 +92,7 @@ const TARGETS = {
     // strings.js comes first because an event page has no importScripts, which
     // is how the Chrome worker pulls the catalogue in. Here the order of this
     // array is the whole loading mechanism: background.js paints the toolbar
-    // tooltip on the way up and needs BumplineText to already be there.
+    // tooltip on the way up and needs VintimatedText to already be there.
     out.background = { scripts: ['strings.js', 'background.js'] };
 
     out.browser_specific_settings = {

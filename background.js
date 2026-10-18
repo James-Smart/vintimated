@@ -36,7 +36,7 @@ if (typeof importScripts === 'function') importScripts('strings.js');
 // once for both.
 const ext = globalThis.browser ?? globalThis.chrome;
 
-const TOKEN_KEYS = { csrf: 'bumpline.csrf', anon: 'bumpline.anon' };
+const TOKEN_KEYS = { csrf: 'vintimated:csrf', anon: 'vintimated:anon' };
 
 // Vinted runs one domain per country; the request filter has to name them all.
 const COUNTRY_DOMAINS = [
@@ -234,7 +234,7 @@ async function paintActiveTab() {
 // The language is read in the same breath and for the same reason: the words
 // live in memory, so the catalogue is already in the browser's language by the
 // time this runs, and only a seller who overruled the browser costs anything.
-// Absent means 'auto', which BumplineText.use reads as "ask the browser".
+// Absent means 'auto', which VintimatedText.use reads as "ask the browser".
 async function paintIconFromStore() {
   try {
     const bag = await ext.storage.local.get([ENABLED_KEY, LANG_KEY]);
