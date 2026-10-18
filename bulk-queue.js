@@ -113,7 +113,22 @@ const BulkQueue = (() => {
     return { run, stop };
   }
 
-  return { create };
+  // "Relist all" walks a whole wardrobe, and Vinted would refuse to copy parts
+  // of it: a sold or reserved item in the queue is a walk that stalls over
+  // something that could never have worked. Which items those are is the
+  // caller's question — the status fields belong to the page, the shape of the
+  // walk does not — so the predicate arrives and this keeps only the ids it
+  // accepts, in the order they came.
+  function filterEditable(items, isEditable) {
+    const ids = [];
+    for (const item of items || []) {
+      if (!item || item.id == null) continue;
+      if (isEditable(item)) ids.push(item.id);
+    }
+    return ids;
+  }
+
+  return { create, filterEditable };
 })();
 
 // require() in Node hands over the same object the extension reads off the

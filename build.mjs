@@ -42,6 +42,9 @@ const PAYLOAD = [
   // The photo-refresh core and its canvas adapter, loaded before content.js
   // the way the manifest loads it.
   'photo-refresh.js',
+  // The bulk queue state machine, loaded before content.js the way the
+  // manifest loads it.
+  'bulk-queue.js',
   'content.js',
   'popup.html',
   'popup.css',

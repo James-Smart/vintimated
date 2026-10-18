@@ -81,6 +81,8 @@
     toast: 'vintimated-toast',
     banner: 'vintimated-banner',
     ageLine: 'vintimated-age',
+    select: 'vintimated-select',
+    bulkbar: 'vintimated-bulkbar',
   };
 
   // Two attempts, not five. Vinted rate-limits without saying so, and a refusal
@@ -613,7 +615,7 @@
   // label on that button is the only progress the seller can see.
   function removeOurUi() {
     const ours = `${SELECTOR.ourButton}, .${CLASS.gap}, .${CLASS.ageLine}, ` +
-      `.${CLASS.banner}, .${CLASS.toast}`;
+      `.${CLASS.banner}, .${CLASS.toast}, .${CLASS.select}, #${BAR_ID}`;
     for (const node of document.querySelectorAll(ours)) {
       if (node.classList.contains('is-busy')) continue;
       node.remove();
@@ -623,6 +625,11 @@
   function applyEnabled(on) {
     if (enabled === on) return;
     enabled = on;
+    // Off means off. A walk in flight finishes the item in hand — the copy is
+    // mid-flight, exactly as for a single relist under way — but nothing new
+    // starts: without this the switch could not stop a walk whose Stop button
+    // the removal below is about to take away.
+    if (!on && bulkQueue) bulkQueue.stop();
     if (on) attachButtons();
     else removeOurUi();
   }
@@ -1133,6 +1140,31 @@
       /* Two corners, so neither can cover the other. */
       .${CLASS.toast}  { right: 16px; bottom: 16px; font-weight: 500; }
       .${CLASS.banner} { right: 16px; top: 16px; max-width: 340px; }
+
+      /* The bulk bar: one row of controls along the bottom edge of a wardrobe
+         page. The toast card reused as furniture — same tokens, same dark
+         mode — pinned bottom-centre instead of a corner. */
+      .${CLASS.bulkbar} {
+        left: 50%;
+        bottom: 16px;
+        transform: translateX(-50%);
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+        max-width: min(920px, calc(100vw - 32px));
+        font-weight: 500;
+      }
+      /* The card is display:flex, which outvotes the hidden attribute's own
+         display:none; this gives the attribute its say back. */
+      .${CLASS.bulkbar}[hidden] { display: none; }
+      .vintimated-bulkbar__status { color: var(--bl-muted-ink); }
+      .${CLASS.select} {
+        display: block;
+        margin-top: 8px;
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+      }
       .vintimated-card__why {
         margin-top: 8px;
         font-size: 13px;
@@ -2253,17 +2285,24 @@
   // the mode, and the hooks that stand in for a button: label(text) for the
   // progress a label would have shown, busy(true|false) for the disabled
   // state, card() to name the on-screen card worth looking at (a run with no
-  // card passes nothing), and reload: false to hold the page still when the
-  // run settles. relist below is the button's thin wrapper over this; a queue
-  // can drive the same run with no button at all.
+  // card passes nothing), reload: false to hold the page still when the run
+  // settles, and budgetPreapproved: true to skip the volume-alarm question —
+  // a queue has asked it once for the whole walk and must not be asked again
+  // per item once the limits trip. relist below is the button's thin wrapper
+  // over this; a queue can drive the same run with no button at all.
+  //
+  // The promise answers whether the relist finished (true) or not (false): a
+  // queue counts what came through, and a failure swallowed here would else be
+  // counted as a success by the walk. The button ignores the answer — its own
+  // feedback is the toast and the label, exactly as before — so nothing about
+  // the single-item path changes with it.
   async function runRelist(itemId, mode, hooks) {
     // An unfinished relist means an original is already gone. Finish that
     // before starting anything new.
     const outstanding = await readPending(itemId);
     if (outstanding) {
       toast(T('toast.resumingUnfinished'), 'bad');
-      await advancePending(itemId, outstanding, null, true);
-      return;
+      return Boolean(await advancePending(itemId, outstanding, null, true));
     }
 
     const draftOnly = mode === 'draft';
@@ -2283,7 +2322,7 @@
       if (paused) {
         applyLock(paused);
         toast(T('toast.pausedUntil', clockOf(paused.until)), 'bad');
-        return;
+        return false;
       }
 
       const pace = await paceProfile();
@@ -2301,7 +2340,12 @@
       const thisHour = countWithin(log, HOUR_WINDOW_MS);
       const overDay = today >= DAY_ALARM_AT;
 
-      if (overDay || thisHour >= HOUR_ALARM_AT) {
+      // budgetPreapproved is a queue's word that the volume has already been
+      // gone over once, for the walk as a whole: asking again here would put
+      // the same question in front of the seller once per item, the moment the
+      // limits trip. Everything above and below this line still runs for a
+      // queue — only the question was the walk's to ask.
+      if (!hooks.budgetPreapproved && (overDay || thisHour >= HOUR_ALARM_AT)) {
         hooks.label(T('button.waiting'));
         const carryOn = await askToContinue({
           title: overDay ? T('budget.title.day') : T('budget.title.hour'),
@@ -2313,7 +2357,7 @@
         });
         if (!carryOn) {
           toast(T('toast.stopped'));
-          return;
+          return false;
         }
       }
 
@@ -2486,7 +2530,7 @@
         // The draft is the finished result, not something still pending.
         await forgetPending(itemId);
         await settle(itemId, T('toast.originalDeletedDraft'), settleOptions);
-        return;
+        return true;
       }
 
       hooks.label(T('button.publishing'));
@@ -2501,10 +2545,13 @@
       );
       if (newId) await settle(itemId, T('toast.relisted'), settleOptions);
       // On failure advancePending has already stored the record and raised the
-      // banner, and the next page load will try again.
+      // banner, and the next page load will try again. The answer goes with
+      // it: a walk that counts successes has to hear about this one.
+      return Boolean(newId);
     } catch (err) {
       console.error('[Vintimated]', err);
       toast(T('toast.relistStopped', (err && err.message) || err), 'bad');
+      return false;
     } finally {
       hooks.busy(false);
       // A refusal may have arrived mid-relist. Re-enabling above is
@@ -2537,6 +2584,390 @@
     } finally {
       setButtonLabel(button, restingLabel);
     }
+  }
+
+  // ===========================================================================
+  // Bulk relisting
+  //
+  // One wardrobe, one walk. The seller picks items with the checkboxes under
+  // their buttons (or takes the whole wardrobe with "Relist all") and the
+  // queue walks them one at a time: each item is a full runRelist, settled in
+  // place with no reload, and the page reloads once when the walk is over.
+  // The walk is paced slower than a hand on the button and can be stopped
+  // between items; a refusal from Vinted halts it with the rest untouched.
+  // ===========================================================================
+
+  const BAR_ID = 'vintimated-bulkbar';
+
+  // Keyed by item id and never by node: Vinted re-renders cards constantly —
+  // every mutation runs attachButtons again — so a selection kept on a DOM
+  // element would be describing a card that no longer exists. A Map of the
+  // ids survives every re-render, and the checkboxes are rebuilt from it.
+  const selection = new Map();
+
+  // The walk in progress, or null. It is also what the bar's buttons read:
+  // nothing new starts while one is running, and Stop is armed only then.
+  let bulkQueue = null;
+
+  // '3/17' while an item runs, from the queue's 1-based index. Set before
+  // runOne starts, so the item's own phase labels arrive already prefixed
+  // with it — "3/17 · Relisting…" — and one line answers both questions.
+  let bulkProgress = '';
+
+  // Which items "all" is allowed to mean. canRelist answers this for a card
+  // out of the wardrobe index; this answers it from the user-items reply,
+  // keying on the same three fields that decide copyability there: an item is
+  // out when it is closed (is_closed), when something is closing it
+  // (item_closing_action), or when Vinted says it can no longer be edited
+  // (can_edit === false). Anything the reply is silent on stays in, the same
+  // leniency canRelist shows an item the index has not reached yet.
+  const isCopyable = item =>
+    !item.is_closed && !item.item_closing_action && item.can_edit !== false;
+
+  // What is on screen right now, in card order: the fallback "all", and the
+  // only one there is when the wardrobe API will not answer.
+  function idsOnScreen() {
+    const ids = [];
+    for (const card of document.querySelectorAll(SELECTOR.card)) {
+      const id = itemIdFor(card);
+      if (id && canRelist(id)) ids.push(id);
+    }
+    return ids;
+  }
+
+  // "Relist all" needs the whole wardrobe and the page only holds what has
+  // scrolled into view, so the ids are read from Vinted's own listing of the
+  // member's items, a screenful at a time, until a page comes back empty.
+  // Sold and reserved items never make it out of here: filterEditable keeps
+  // only what Vinted would still let us copy.
+  async function enumeratedIds() {
+    const member = currentMemberId();
+    const found = [];
+    let page = 1;
+    let answered = Boolean(member);
+
+    while (answered && page <= 50) {
+      try {
+        const reply = await bridgedFetch(
+          `${SITE}/api/v2/users/${member}/items?per_page=96&page=${page}`,
+          { credentials: 'include' },
+        );
+        if (!reply.ok) {
+          answered = false;
+          break;
+        }
+        const parsed = await reply.json().catch(() => null);
+        // The wardrobe index answers { items: [...] }; a bare array is the
+        // same shape without the wrapper. Anything else is the endpoint
+        // having changed under us.
+        const items = Array.isArray(parsed) ? parsed : parsed && parsed.items;
+        if (!Array.isArray(items)) {
+          answered = false;
+          break;
+        }
+        if (!items.length) break; // the empty page that ends the walk
+        for (const id of BulkQueue.filterEditable(items, isCopyable)) {
+          found.push(String(id));
+        }
+        page += 1;
+        await pause(100); // stay polite with the API
+      } catch (_) {
+        answered = false;
+      }
+    }
+
+    if (answered && found.length) return found;
+    // The endpoint erred, changed shape, or came back empty while the page
+    // plainly shows relistable cards. What is on screen is the honest answer,
+    // and the seller is told it is only what is on screen.
+    toast(T('bulk.fallback'), 'bad');
+    return idsOnScreen();
+  }
+
+  // The one question before a walk starts, and the only one — asked through
+  // the queue's confirmStart so "Relist selected (3)" and "Relist all" are
+  // the same decision with the same count on the table. The count comes first
+  // because the seller may not have one in their head; then, when the walk
+  // would push the day's or the hour's tally to where Vinted reads a bulk
+  // operation, the volume warning instead of a quiet start. Either way it is
+  // asked once for the whole walk: runRelist's own per-item gate is passed
+  // over (budgetPreapproved) precisely so this is the only time the question
+  // is put.
+  async function confirmBulk(count) {
+    try {
+      const go = await askToContinue({
+        title: T('button.relist'),
+        body: T('bulk.confirmAll', count),
+        proceed: T('budget.proceed'),
+        cancel: T('budget.cancel'),
+      });
+      if (!go) return false;
+
+      // The batch is counted as if it all landed now: the walk is about to
+      // spend this many of the day's and the hour's allowance. The hourly
+      // side of the rule — "the hourly window is clear" — is read as the
+      // window staying clear across the whole walk, clear of the alarm once
+      // the batch is added: a check that only looked at what had already
+      // happened would wave a batch straight past 4/hour without a word, and
+      // that silent overrun is the whole thing this gate exists to prevent.
+      const log = await relistLog();
+      const overDay = countWithin(log, DAY_WINDOW_MS) + count >= DAY_ALARM_AT;
+      const overHour = countWithin(log, HOUR_WINDOW_MS) + count >= HOUR_ALARM_AT;
+      if (!overDay && !overHour) return true;
+
+      return await askToContinue({
+        title: overDay ? T('budget.title.day') : T('budget.title.hour'),
+        body: T('bulk.budget.body', count),
+        proceed: T('budget.proceed'),
+        cancel: T('budget.cancel'),
+      });
+    } catch (_) {
+      // A dialog that cannot be drawn is not a permission.
+      return false;
+    }
+  }
+
+  // The bar's status line. Never throws: the label hook rides inside
+  // runRelist, where a paint error would else fail the item itself. Writes
+  // only on change: the page's mutation observer answers every write with
+  // another paint, and a repaint of the same text is still a write.
+  function setBulkStatus(text) {
+    const bar = document.getElementById(BAR_ID);
+    const slot = bar && bar.querySelector('.vintimated-bulkbar__status');
+    if (slot && slot.textContent !== text) slot.textContent = text;
+  }
+
+  // The one place a walk says how it went: one summary whatever the end, and
+  // one reload when the page has gone stale under it — never between items,
+  // which the per-item settle already knows (reload: false).
+  async function finishBulk(result) {
+    try {
+      if (result.status === 'done') {
+        // A stop that landed during the last item reports done: everything
+        // came through, and that is what the seller needs to hear.
+        toast(T('bulk.done', result.completed.length, result.failed.length));
+      } else if (result.status === 'halted') {
+        toast(T('bulk.halted'), 'bad');
+      } else {
+        toast(T('bulk.stopped'));
+      }
+      // A walk that never got past its question changed nothing, and a seller
+      // who backed out keeps their place on the page.
+      const attempted = result.completed.length + result.failed.length;
+      if (attempted && (await reloadWanted())) {
+        // The same grace settle() gives a single relist, so the summary is
+        // read before the page it sits on goes away.
+        setTimeout(() => location.reload(), 1200);
+      }
+    } catch (err) {
+      trace('could not report the walk', err);
+    }
+  }
+
+  // One walk over the given ids, in the order given. The queue owns the order
+  // and the restraint; everything on the page is hooks into it.
+  function startBulk(ids) {
+    if (bulkQueue || !ids.length) return;
+
+    const queue = BulkQueue.create({
+      ids,
+      runOne: async id => {
+        const ok = await runRelist(id, 'publish', {
+          label: text => setBulkStatus(bulkProgress ? `${bulkProgress} · ${text}` : text),
+          // The bar is the walk's only chrome: it disables the start buttons
+          // for the duration and nothing on the cards is touched.
+          busy: () => {},
+          card: () => document.querySelector(`[data-testid="product-item-id-${id}"]`),
+          // The queue settles each item in place and reloads once at the end.
+          reload: false,
+          // confirmBulk asked about the whole walk. Asking again per item,
+          // once the limits trip, is the bug this flag exists for.
+          budgetPreapproved: true,
+        });
+        // runRelist says whether the item came through; a queue counts what
+        // did, so a swallowed failure would else be counted a success.
+        if (!ok) throw new Error(`relist of ${id} did not finish`);
+      },
+      // A quiet walk: runRelist keeps its own hard cooldown inside each item,
+      // and this is the extra breath between two items, so a batch reads
+      // slower than a hand on the button.
+      nextGap: () => between(10000, 30000),
+      wait: pause,
+      isBlocked: async () => Boolean(await readBlock()),
+    });
+
+    bulkQueue = queue;
+    paintBulkBar();
+
+    queue
+      .run({
+        confirmStart: count => confirmBulk(count),
+        // The queue calls these unprotected, so every body looks after
+        // itself: a paint error must not kill the walk.
+        onProgress: event => {
+          try {
+            bulkProgress = T('bulk.progress', event.index, event.total);
+          } catch (_) {
+            // The prefix is decoration; the walk is not.
+          }
+        },
+        onItemDone: () => {
+          try {
+            setBulkStatus('');
+          } catch (_) {
+            // Same: reporting must never be what stops the queue.
+          }
+        },
+      })
+      .then(result => finishBulk(result))
+      .catch(err => trace('bulk walk broke', err))
+      .finally(() => {
+        bulkQueue = null;
+        bulkProgress = '';
+        paintBulkBar();
+      });
+  }
+
+  // The checkbox under each relistable item's buttons. Idempotent — the
+  // buttons' own host check is the same idea — and re-synced from the
+  // selection on every pass, so a card Vinted re-rendered while the seller
+  // was not looking comes back checked or unchecked exactly as it left.
+  function attachSelection() {
+    for (const bump of document.querySelectorAll(SELECTOR.bump)) {
+      const id = itemIdFor(bump);
+      // The same fence the buttons use: closed items have no editable record,
+      // so a checkbox on one could only ever select a failure.
+      if (!id || !canRelist(id)) continue;
+      const host = bump.parentElement;
+      if (!host) continue;
+
+      let box = host.querySelector(`.${CLASS.select}`);
+      if (!box) {
+        box = document.createElement('input');
+        box.type = 'checkbox';
+        box.className = CLASS.select;
+        box.addEventListener('change', () => {
+          if (box.checked) selection.set(id, true);
+          else selection.delete(id);
+          paintBulkBar();
+        });
+        host.appendChild(box);
+      }
+      box.checked = selection.has(id);
+    }
+
+    // An item that sold after it was picked leaves neither a checkbox nor a
+    // place in the walk behind: dropButtonsOnClosedItems does this for the
+    // buttons, and the boxes answer the same way.
+    for (const box of document.querySelectorAll(`.${CLASS.select}`)) {
+      const id = itemIdFor(box);
+      if (!id || !canRelist(id)) box.remove();
+    }
+  }
+
+  // The bar: what is picked, what the walk is doing, and the five controls.
+  // Built once and painted from state on every pass, so a re-render or a
+  // language change costs a repaint rather than a new bar — and a walk under
+  // way keeps its Stop, which is the one button that must survive one.
+  function buildBulkBar() {
+    const bar = document.createElement('div');
+    bar.id = BAR_ID;
+    bar.className = `vintimated-card ${CLASS.bulkbar}`;
+
+    const count = document.createElement('span');
+    count.className = 'vintimated-bulkbar__count';
+
+    const status = document.createElement('span');
+    status.className = 'vintimated-bulkbar__status';
+
+    const selectLoaded = buildButton(T('bulk.bar.selectLoaded'));
+    selectLoaded.classList.add('vintimated-bulkbar__select');
+    selectLoaded.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      for (const box of document.querySelectorAll(`.${CLASS.select}`)) {
+        const id = itemIdFor(box);
+        if (!id) continue;
+        selection.set(id, true);
+        box.checked = true;
+      }
+      paintBulkBar();
+    });
+
+    const clear = buildButton(T('bulk.bar.clear'));
+    clear.classList.add('vintimated-bulkbar__clear');
+    clear.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      selection.clear();
+      for (const box of document.querySelectorAll(`.${CLASS.select}`)) box.checked = false;
+      paintBulkBar();
+    });
+
+    const picked = buildButton(T('bulk.bar.relistSelected', selection.size));
+    picked.classList.add('vintimated-bulkbar__picked');
+    picked.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (bulkQueue) return;
+      // Checked when the walk starts rather than when the box was ticked: an
+      // item that sold in between must never be queued.
+      startBulk([...selection.keys()].filter(canRelist));
+    });
+
+    const all = buildButton(T('bulk.bar.relistAll'));
+    all.classList.add('vintimated-bulkbar__all');
+    all.addEventListener('click', async event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (bulkQueue) return;
+      startBulk(await enumeratedIds());
+    });
+
+    const stop = buildButton(T('bulk.bar.stop'));
+    stop.classList.add('vintimated-bulkbar__stop');
+    stop.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      // Only raises a hand: the item in hand finishes, nothing new starts.
+      if (bulkQueue) bulkQueue.stop();
+    });
+
+    bar.append(count, status, selectLoaded, clear, picked, all, stop);
+    return bar;
+  }
+
+  function paintBulkBar() {
+    let bar = document.getElementById(BAR_ID);
+    if (!bar) bar = buildBulkBar();
+
+    // Hidden while there is nothing relistable to put it to work on.
+    bar.hidden = !document.querySelector(SELECTOR.ourItem);
+
+    // Text is written only when it changes. attachButtons runs on every
+    // mutation of the page and this repaints from it, so a write of the same
+    // count would replace its node, be a mutation, and come straight back —
+    // the loop paintAgeLabels avoids the same way.
+    const count = bar.querySelector('.vintimated-bulkbar__count');
+    const countText = T('bulk.bar.selected', selection.size);
+    if (count && count.textContent !== countText) count.textContent = countText;
+
+    // The count lives on the button as well as in the label: the button is
+    // what is pressed, and "Relist selected (2)" says what it will do.
+    const picked = bar.querySelector('.vintimated-bulkbar__picked');
+    const label = T('bulk.bar.relistSelected', selection.size);
+    const slot = picked && picked.querySelector('.web_ui__Button__label');
+    if (picked && (!slot || slot.textContent !== label)) setButtonLabel(picked, label);
+
+    const running = Boolean(bulkQueue);
+    if (picked) picked.disabled = running || selection.size === 0;
+    for (const name of ['select', 'clear', 'all']) {
+      const control = bar.querySelector(`.vintimated-bulkbar__${name}`);
+      if (control) control.disabled = running;
+    }
+    const stop = bar.querySelector('.vintimated-bulkbar__stop');
+    // Stop is armed only while a walk runs; every start button is not.
+    if (stop) stop.disabled = !running;
   }
 
   // ===========================================================================
@@ -2592,6 +3023,8 @@
 
     paintAgeLabels();
     paintLock();
+    attachSelection();
+    paintBulkBar();
     rememberProfile();
     if (added) trace('added buttons to', added, 'item(s)');
   }

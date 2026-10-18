@@ -133,6 +133,7 @@
       "js": [
         "strings.js",
         "photo-refresh.js",
+        "bulk-queue.js",
         "content.js"
       ],
       "run_at": "document_idle"

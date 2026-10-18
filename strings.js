@@ -89,6 +89,24 @@ const VintimatedText = (() => {
       'budget.proceed': 'Relist anyway',
       'budget.cancel': 'Stop for now',
 
+      // The bulk bar and the walk it starts. The words are the seller's side
+      // of a queue: what is picked, what the walk is about to cost, and how
+      // it went. Written in English alone for now — t() reads any missing key
+      // across from here.
+      'bulk.bar.selected': '{0} selected',
+      'bulk.bar.selectLoaded': 'Select loaded',
+      'bulk.bar.clear': 'Clear',
+      'bulk.bar.relistSelected': 'Relist selected ({0})',
+      'bulk.bar.relistAll': 'Relist all',
+      'bulk.bar.stop': 'Stop',
+      'bulk.progress': '{0}/{1}',
+      'bulk.done': 'Bulk relist finished: {0} relisted, {1} failed.',
+      'bulk.halted': 'Vinted refused to continue. The items not yet relisted were left untouched.',
+      'bulk.stopped': 'Bulk relist stopped. The items not yet relisted were left untouched.',
+      'bulk.budget.body': '{0} items are about to be relisted from this browser, one after another. That is what Vinted reads as automated activity, and what it does about it is stop the account editing or publishing anything for about a day. Nothing has been deleted yet.',
+      'bulk.confirmAll': 'Relist all {0} items now? Each one is deleted and put back online, with its photos refreshed. Nothing is deleted until a full copy is saved on this device.',
+      'bulk.fallback': 'Could not read the whole wardrobe from Vinted. Relisting what is on this page instead.',
+
       // What stops a relist, in Bumpline's own words. Vinted's words are never
       // in here: a refusal it sent is quoted as it arrived, in whatever
       // language it arrived in, and only the sentence around it is ours.
