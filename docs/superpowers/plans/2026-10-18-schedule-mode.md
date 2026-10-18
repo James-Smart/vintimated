@@ -157,7 +157,7 @@ Seams used (as they exist after the released 1.2.1): `runRelist(itemId, mode, ho
 - Produces: `Scheduler.holdForBudget(counts) -> { hold: boolean, until: 'hour'|'day'|null }` — pure; `counts = { thisHour, today }`: hold when `today + 1 > DAY_ALARM_AT` or `thisHour + 1 > HOUR_ALARM_AT` (the shared-log guarantee: manual relists count, since `relistLog` is one log).
 - Produces: feed — `nextEligibleItem()` in content.js: live ladder items filtered by `isCopyable`/`filterEditable`, `Scheduler.eligible(defn)` (age ≥ threshold), `Scheduler.inScope(defn, id, selection)`, and never an id already relisted by the schedule this period (`state.doneIds` — small array in the state, so a period relists each item at most once even if its age qualifies again after a shorter threshold).
 
-- [ ] **Step 1: Write the failing test** for `holdForBudget`: at `DAY_ALARM_AT`-1 with room in the hour → not held; at `DAY_ALARM_AT` → held (`until: 'day'`); at `HOUR_ALARM_AT` with day room → held (`until: 'hour'`); manual counts included (`scheduledToday: 0` but `today` high → held).
+- [ ] **Step 1: Write the failing test** for `holdForBudget`: at `DAY_ALARM_AT`-1 with room in the hour → not held; at `DAY_ALARM_AT` → held (`until: 'day'`); at `HOUR_ALARM_AT` with day room → held (`until: 'hour'`); manual relists already in the shared log (`today` high) → held.
 - [ ] **Step 2: Run tests to verify they fail** — Run: `npm test` — Expected: FAIL
 - [ ] **Step 3: Implement `holdForBudget` + `nextEligibleItem` + `doneIds` bookkeeping** — on `hold`, the firing records nothing and the next wake re-decides (the `decide` gap already spaces attempts).
 - [ ] **Step 4: Run tests to verify they pass** — Run: `npm test` — Expected: PASS
