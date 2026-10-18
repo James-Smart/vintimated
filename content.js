@@ -2281,6 +2281,33 @@
   // The relist itself
   // ===========================================================================
 
+  // One run at a time per item, whoever is asking. The bulk walk and a
+  // seller's click on a card both end up in runRelist, and two runs of the
+  // same item are not two relists but one race: they share the pending
+  // record, the stashed photo bytes, and forgetPending. The sharp edge is a
+  // run whose removeListing fails because the other run already deleted the
+  // original — its error path calls forgetPending while the first run is
+  // still mid-publish, destroying the only copy of a listing that is already
+  // gone from Vinted. The Set is the fence: the second caller is turned away
+  // at the door with the truth, and the run that got there first owns the
+  // item until it returns. (It closes the old two-buttons-one-card race the
+  // same way.)
+  const relistInFlight = new Set();
+
+  async function runRelist(itemId, mode, hooks) {
+    const key = String(itemId);
+    if (relistInFlight.has(key)) {
+      toast(T('toast.alreadyRelisting'), 'bad');
+      return false;
+    }
+    relistInFlight.add(key);
+    try {
+      return await relistAttempt(itemId, mode, hooks);
+    } finally {
+      relistInFlight.delete(key);
+    }
+  }
+
   // The whole relist without a button in it. The caller hands over the item,
   // the mode, and the hooks that stand in for a button: label(text) for the
   // progress a label would have shown, busy(true|false) for the disabled
@@ -2296,7 +2323,7 @@
   // counted as a success by the walk. The button ignores the answer — its own
   // feedback is the toast and the label, exactly as before — so nothing about
   // the single-item path changes with it.
-  async function runRelist(itemId, mode, hooks) {
+  async function relistAttempt(itemId, mode, hooks) {
     // An unfinished relist means an original is already gone. Finish that
     // before starting anything new.
     const outstanding = await readPending(itemId);
@@ -2775,7 +2802,9 @@
         const ok = await runRelist(id, 'publish', {
           label: text => setBulkStatus(bulkProgress ? `${bulkProgress} · ${text}` : text),
           // The bar is the walk's only chrome: it disables the start buttons
-          // for the duration and nothing on the cards is touched.
+          // for the duration and nothing on the cards is touched. A seller
+          // click on a live card button is harmless: the per-id fence in
+          // runRelist refuses a second run of an item already running.
           busy: () => {},
           card: () => document.querySelector(`[data-testid="product-item-id-${id}"]`),
           // The queue settles each item in place and reloads once at the end.

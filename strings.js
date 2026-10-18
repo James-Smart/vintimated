@@ -55,6 +55,7 @@ const VintimatedText = (() => {
       'toast.reloadToSee': '{0} Reload to see it.',
       'toast.cantFindItem': 'Could not tell which item that button belongs to.',
       'toast.resumingUnfinished': 'An unfinished relist of this item. Resuming it.',
+      'toast.alreadyRelisting': 'A relist of this item is already running. Let it finish first.',
       'toast.stopped': 'Stopped. Nothing was deleted.',
       'toast.relistStopped': 'Relist stopped: {0}',
 
@@ -335,6 +336,7 @@ const VintimatedText = (() => {
       'toast.reloadToSee': '{0} Ricarica per vederlo.',
       'toast.cantFindItem': 'Impossibile capire a quale articolo appartiene questo pulsante.',
       'toast.resumingUnfinished': 'Una ripubblicazione di questo articolo non è stata completata. Ripresa in corso.',
+      'toast.alreadyRelisting': 'Una ripubblicazione di questo articolo è già in corso. Lasciala finire prima.',
       'toast.stopped': 'Interrotto. Non è stato eliminato nulla.',
       'toast.relistStopped': 'Ripubblicazione interrotta: {0}',
 
@@ -504,6 +506,7 @@ const VintimatedText = (() => {
       'toast.reloadToSee': '{0} Recharge la page pour le voir.',
       'toast.cantFindItem': 'Impossible de savoir à quel article ce bouton appartient.',
       'toast.resumingUnfinished': 'Une republication de cet article n\'a pas abouti. Reprise en cours.',
+      'toast.alreadyRelisting': 'Une republication de cet article est déjà en cours. Laissez-la se terminer d\'abord.',
       'toast.stopped': 'Arrêté. Rien n\'a été supprimé.',
       'toast.relistStopped': 'Republication arrêtée : {0}',
 
