@@ -184,8 +184,11 @@
         <!-- What a relist hands Vinted for photos: never the bytes the
              original carries, unless the seller says so. The help line under
              the label belongs to the option that is picked, and the three
-             modes are offered under their own names — they are the setting's
-             three values, and what each does is what the help line says. -->
+             modes are offered under names of their own. The names are words
+             on the panel and come from the catalogue like every other; the
+             value each option carries is the setting's own three answers,
+             written here because that is what the storage key holds. What
+             each does is what the help line says. -->
         <p class="setting__group" data-i18n="popup.settings.group.photos">Photos</p>
 
         <label class="switch">
@@ -198,9 +201,10 @@
             </span>
           </span>
           <select class="switch__select" id="photo-refresh-select">
-            <option value="off">Off</option>
-            <option value="stealth">Stealth</option>
-            <option value="bordered" selected>Bordered</option>
+            <option value="off" data-i18n="setting.photoRefresh.off.label">Off</option>
+            <option value="stealth" data-i18n="setting.photoRefresh.stealth.label">Stealth</option>
+            <option value="bordered" selected
+                    data-i18n="setting.photoRefresh.bordered.label">Bordered</option>
           </select>
         </label>
 

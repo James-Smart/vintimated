@@ -44,11 +44,11 @@ const VINTED_HOST = /(^|\.)vinted\.[a-z]{2,3}(\.[a-z]{2})?$/i;
 const LANGS = ['auto', ...Object.keys(VintimatedText.CATALOG)];
 
 // The photo-refresh modes and the help line each one earns under the label.
-// The mode names are not in the catalogue — they are the setting's own three
-// values, written the way the popup's select offers them — so the keys map
-// from the stored value rather than translate it. The modes here have to agree
-// with PhotoRefresh.MODES in photo-refresh.js, which the page enforces and
-// this panel only offers.
+// The mode names themselves are the setting's own three values, so what the
+// stored value maps from is written here rather than translated; the words
+// the select shows beside them are catalogued like any others. The modes here
+// have to agree with PhotoRefresh.MODES in photo-refresh.js, which the page
+// enforces and this panel only offers.
 const PHOTO_HELP = {
   off: 'setting.photoRefresh.off.help',
   stealth: 'setting.photoRefresh.stealth.help',
