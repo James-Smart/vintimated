@@ -696,8 +696,9 @@ body {
    section is shut. */
 .setting { padding-bottom: 16px; }
 
-/* Three switches in a row is a list; two headings make it a decision about
-   pace and a decision about what happens afterwards. */
+/* Three switches in a row is a list; the headings make it a decision about
+   pace, a decision about the photos, and a decision about what happens
+   afterwards. */
 .setting__group {
   margin: 0 0 12px;
   color: var(--muted-foreground);
@@ -754,10 +755,31 @@ body {
    above a group heading stays, because that is where the subject changes. */
 .switch + .switch { margin-top: 20px; }
 
-/* The language row's control is a <select>, not a checkbox, so it needs its
-   own look rather than .toggle's. Same tokens as .button--quiet: the panel's
-   own border and background, so it reads as part of this drawer rather than
-   as a browser-default control dropped into it. */
+/* The photo-refresh row's control is a <select>, not a checkbox, so it needs
+   its own look rather than .toggle's. Same tokens as .button--quiet: the
+   panel's own border and background, so it reads as part of this drawer rather
+   than as a browser-default control dropped into it. */
+.switch__select {
+  flex: none;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.switch__select:hover { background: var(--muted); }
+
+/* The toggle reports focus the same way: the border joins the ring. */
+.switch__select:focus-visible { border-color: var(--ring); }
+
+@media (prefers-color-scheme: dark) {
+  .switch__select { background: transparent; }
+}
 /* --- the risk gate ------------------------------------------------------ */
 
 /* Two buttons side by side, and the safe one first: the reading order is the

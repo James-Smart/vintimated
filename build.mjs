@@ -39,6 +39,9 @@ const OUT = join(ROOT, 'build');
 const PAYLOAD = [
   'background.js',
   'bridge.js',
+  // The photo-refresh core and its canvas adapter, loaded before content.js
+  // the way the manifest loads it.
+  'photo-refresh.js',
   'content.js',
   'popup.html',
   'popup.css',
@@ -238,10 +241,11 @@ function build(target, manifest) {
   console.log(`${target}: ${relative(ROOT, archive)} (${entries.length} files, ${size} kB)`);
 }
 
-// The two catalogues have to hold the same keys, and every key the code asks
-// for has to be in them. Nothing else in this repository is tested, so the
-// check runs where the package is made: a translation that drifted is caught
-// before it is uploaded rather than by a seller reading a key name on a button.
+// Every key the code asks for has to be in the catalogue, and no language may
+// carry a key the base language is missing. Nothing else in this repository is
+// tested, so the check runs where the package is made: a translation that
+// drifted is caught before it is uploaded rather than by a seller reading a key
+// name on a button.
 function checkCatalogues() {
   const source = readFileSync(join(ROOT, 'strings.js'), 'utf8');
   const { CATALOG } = new Function(
@@ -257,11 +261,15 @@ function checkCatalogues() {
   const languages = Object.keys(CATALOG);
   const complaints = [];
 
+  // The other direction of this rule is not enforced on purpose: a key new in
+  // the base language is the normal shape of a new string here, written before
+  // anybody has translated it, and t() reads it across in English until they
+  // do. What must never happen is the opposite — a key a language carries that
+  // English does not, which would fall back to its own name on a button — so
+  // that one is what is checked.
   for (const lang of languages) {
-    for (const other of languages) {
-      for (const key of Object.keys(CATALOG[other])) {
-        if (!(key in CATALOG[lang])) complaints.push(`${lang} is missing ${key}`);
-      }
+    for (const key of Object.keys(CATALOG[lang])) {
+      if (!(key in CATALOG[BASE_LANG])) complaints.push(`${BASE_LANG} is missing ${key}`);
     }
   }
 

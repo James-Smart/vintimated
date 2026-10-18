@@ -132,6 +132,7 @@
       ],
       "js": [
         "strings.js",
+        "photo-refresh.js",
         "content.js"
       ],
       "run_at": "document_idle"

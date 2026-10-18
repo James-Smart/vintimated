@@ -199,6 +199,7 @@ const VintimatedText = (() => {
       // what is not at its default.
       'popup.settings.title': 'Settings',
       'popup.settings.group.pacing': 'Pacing',
+      'popup.settings.group.photos': 'Photos',
       'popup.settings.group.afterRelist': 'After a relist',
       // '{0} changed' reads '1 changed' at one, which is fine in English but
       // wrong in a language that pluralises the word — Italian included — so
@@ -219,6 +220,15 @@ const VintimatedText = (() => {
       'popup.lang.auto': 'Automatic (browser language)',
       'popup.settings.localDrafts.label': 'Keep the copy on this device',
       'popup.settings.localDrafts.hint': 'Relist button only. Off saves a draft to your Vinted account first, as in versions before 1.0.1.',
+
+      // The photo-refresh row: what happens to the photos on their way into
+      // the copy. The three modes are offered under their own names — Off,
+      // Stealth, Bordered — because they are the setting's own three values;
+      // what each one does to a photo is the part that needs saying.
+      'setting.photoRefresh': 'Refresh the photos on upload',
+      'setting.photoRefresh.off.help': 'The photos go up just as they came down — the same photo twice, which is what a duplicate listing looks like.',
+      'setting.photoRefresh.stealth.help': 'Every photo is tilted a whisker, dusted and re-encoded on the way up. Invisible to buyers; Vinted never sees the same photo twice.',
+      'setting.photoRefresh.bordered.help': 'Recommended. The same invisible changes, plus a thin white frame — visible proof that the photo was refreshed.',
 
       // The warning dialog: a shared shell (popup.risk.keep and
       // popup.risk.change are its defaults, which no call site currently

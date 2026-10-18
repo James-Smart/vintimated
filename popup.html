@@ -140,8 +140,8 @@
   <details class="drawer">
     <summary class="drawer__summary">
       <span data-i18n="popup.settings.title">Settings</span>
-      <!-- What is not at its default, said without opening the section. Three
-           switches all sitting where they were left is the common case, and it
+      <!-- What is not at its default, said without opening the section.
+           Everything sitting where it was left is the common case, and it
            should not need reading. -->
       <span class="drawer__count" id="settings-count"></span>
       <svg class="icon icon--chevron" viewBox="0 0 24 24" aria-hidden="true">
@@ -179,6 +179,29 @@
             </span>
           </span>
           <input class="toggle" type="checkbox" id="pace-toggle" role="switch" checked>
+        </label>
+
+        <!-- What a relist hands Vinted for photos: never the bytes the
+             original carries, unless the seller says so. The help line under
+             the label belongs to the option that is picked, and the three
+             modes are offered under their own names — they are the setting's
+             three values, and what each does is what the help line says. -->
+        <p class="setting__group" data-i18n="popup.settings.group.photos">Photos</p>
+
+        <label class="switch">
+          <span class="switch__label">
+            <span data-i18n="setting.photoRefresh">Refresh the photos on upload</span>
+            <span class="switch__hint" id="photo-refresh-hint"
+                  data-i18n="setting.photoRefresh.bordered.help">
+              Recommended. The same invisible changes, plus a thin white frame —
+              visible proof that the photo was refreshed.
+            </span>
+          </span>
+          <select class="switch__select" id="photo-refresh-select">
+            <option value="off">Off</option>
+            <option value="stealth">Stealth</option>
+            <option value="bordered" selected>Bordered</option>
+          </select>
         </label>
 
         <p class="setting__group" data-i18n="popup.settings.group.afterRelist">After a relist</p>

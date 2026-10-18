@@ -19,11 +19,13 @@
 // a whisker, scaled a whisker, its channels nudged and its grain dusted with
 // noise — moves no buyer will notice and no duplicate detector can ignore.
 //
-// This file is the arithmetic only. It decides what to do (generateSpec), where
-// the drawing goes (geometry) and what happens to the pixels (applyPixels);
-// the canvas work that turns those decisions into a picture belongs to the
-// caller. Everything here is pure — no DOM, no canvas — so it runs in Node as
-// comfortably as on a page, which is what the tests lean on.
+// This file is the arithmetic and the canvas that draws it. It decides what to
+// do (generateSpec), where the drawing goes (geometry) and what happens to the
+// pixels (applyPixels); refresh() is the one door callers use, and behind it
+// the browser's own canvas turns those decisions into a picture. Everything
+// except that canvas is pure — no DOM — so it runs in Node as comfortably as
+// on a page, which is what the tests lean on: refresh() takes its decoder and
+// its drawer as arguments, and defaults to the browser's own.
 //
 // Loaded as a plain script before the caller's own, the way store.js is. Node
 // reaches the very same object through require(), at the bottom of the file.
@@ -140,7 +142,98 @@ const PhotoRefresh = (() => {
     }
   }
 
-  return { rng, generateSpec, geometry, applyPixels, MODES };
+  // The canvas half of a refresh. The picture is rebuilt here from the core's
+  // decisions — drawn to cover the frame at whatever tilt and scale the spec
+  // carries, dusted with its grain, framed if the spec asks for it — then
+  // shrunk to size and handed back as JPEG. Nothing here decides anything.
+  function drawOnCanvas(bitmap, spec, options) {
+    const width = bitmap.width;
+    const height = bitmap.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+
+    // Cover-fill: geometry sizes the draw so that, turned through the spec's
+    // angle about the centre, it reaches every corner of the frame. The
+    // picture overhangs on all four sides and is cropped back to width×height,
+    // so no tilted edge of the original can show.
+    const g = geometry(width, height, spec.angleRad, spec.scale);
+    ctx.translate(width / 2, height / 2);
+    ctx.rotate(spec.angleRad);
+    ctx.drawImage(bitmap, g.offsetX - width / 2, g.offsetY - height / 2, g.drawW, g.drawH);
+    // The tilt is spent; the frame and the pixels below are square.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // The grain and the channel nudges, from a stream seeded the same way as
+    // the spec above, so a photo refreshed from a known seed replays to the
+    // identical pixel.
+    const image = ctx.getImageData(0, 0, width, height);
+    applyPixels(image.data, spec, rng(options.seed));
+    ctx.putImageData(image, 0, 0);
+
+    // The frame goes on after the grain, so the border is a clean white line
+    // rather than one the noise has dusted. Its width is the spec's fraction
+    // of the short edge, drawn inside the photo's own outline.
+    if (spec.border) {
+      const band = Math.max(1, Math.round(Math.min(width, height) * spec.border.widthPct));
+      ctx.strokeStyle = `rgba(${spec.border.rgba.join(',')})`;
+      ctx.lineWidth = band;
+      ctx.strokeRect(band / 2, band / 2, width - band, height - band);
+    }
+
+    // Nothing larger than maxEdge leaves the device: a photo that came in at
+    // four thousand pixels is drawn at four thousand and shrinks on the way
+    // out, which keeps the transform at source quality and the upload at a
+    // size worth uploading.
+    let out = canvas;
+    const longest = Math.max(width, height);
+    if (longest > options.maxEdge) {
+      const ratio = options.maxEdge / longest;
+      out = document.createElement('canvas');
+      out.width = Math.max(1, Math.round(width * ratio));
+      out.height = Math.max(1, Math.round(height * ratio));
+      out.getContext('2d').drawImage(canvas, 0, 0, out.width, out.height);
+    }
+
+    return new Promise((resolve, reject) => {
+      out.toBlob(
+        blob => (blob ? resolve(blob) : reject(new Error('JPEG encode failed'))),
+        'image/jpeg',
+        options.quality,
+      );
+    });
+  }
+
+  // The one door callers use. 'off' is the seller's choice to leave the photo
+  // alone, and it is answered with the very blob it was handed. Otherwise the
+  // photo goes out through decode and draw — the browser's own bitmap and
+  // canvas unless the caller brings its own, which is how the tests stand in
+  // for a canvas Node does not have.
+  //
+  // Nothing that goes wrong in there is allowed to reach the caller: a photo
+  // that cannot be decoded, drawn or encoded is uploaded exactly as it
+  // arrived. A relist must never fail — or pause to worry — over a photo.
+  async function refresh(blob, options = {}, deps = {}) {
+    try {
+      if (options.mode === 'off') return blob;
+      const decode = deps.decode || (source => createImageBitmap(source));
+      const draw = deps.draw || drawOnCanvas;
+      const settings = {
+        mode: options.mode,
+        seed: options.seed,
+        maxEdge: options.maxEdge ?? 2048,
+        quality: options.quality ?? 0.92,
+      };
+      const bitmap = await decode(blob);
+      const spec = generateSpec(options.mode, rng(options.seed));
+      return await draw(bitmap, spec, settings);
+    } catch (_) {
+      return blob;
+    }
+  }
+
+  return { rng, generateSpec, geometry, applyPixels, refresh, MODES };
 })();
 
 // require() in Node hands over the same object the extension reads off the

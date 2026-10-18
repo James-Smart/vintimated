@@ -150,3 +150,92 @@ test("applyPixels leaves the photo untouched when the spec is disabled", () => {
   applyPixels(data, spec({ enabled: false, channelShift: [5, -5, 0], noiseAmp: 3 }), rng(1));
   assert.deepEqual([...data], [100, 100, 100, 255]);
 });
+
+// The browser adapter: refresh() decides whether to do anything at all, hands
+// the work to decode and draw, and swallows whatever goes wrong — a relist
+// must never fail or slow over a photo. Node has neither a canvas nor
+// createImageBitmap, so both halves are stubbed and the tests hold refresh to
+// its promises about the hand-offs: which dep is called, with what, and what
+// comes back out when one of them throws.
+
+test("refresh with mode 'off' returns the same blob and never decodes it", async () => {
+  const blob = new Blob(['original']);
+  const calls = [];
+  const result = await PhotoRefresh.refresh(blob, { mode: 'off' }, {
+    decode: async () => {
+      calls.push('decode');
+      return { width: 4, height: 3 };
+    },
+    draw: async () => {
+      calls.push('draw');
+      return new Blob(['drawn']);
+    },
+  });
+  assert.equal(result, blob);
+  assert.deepEqual(calls, []);
+});
+
+test('refresh returns the original blob when decode throws, and never draws', async () => {
+  const blob = new Blob(['original']);
+  let drew = false;
+  const result = await PhotoRefresh.refresh(blob, { mode: 'stealth' }, {
+    decode: async () => {
+      throw new Error('no bitmap');
+    },
+    draw: async () => {
+      drew = true;
+      return new Blob(['drawn']);
+    },
+  });
+  assert.equal(result, blob);
+  assert.equal(drew, false);
+});
+
+test('refresh returns the original blob when draw throws', async () => {
+  const blob = new Blob(['original']);
+  const result = await PhotoRefresh.refresh(blob, { mode: 'bordered' }, {
+    decode: async () => ({ width: 4, height: 3 }),
+    draw: async () => {
+      throw new Error('the canvas is gone');
+    },
+  });
+  assert.equal(result, blob);
+});
+
+test('refresh draws the decoded bitmap with an enabled spec and returns the drawn blob', async () => {
+  for (const [mode, bordered] of [['stealth', false], ['bordered', true]]) {
+    const blob = new Blob(['original']);
+    const drawn = new Blob(['drawn']);
+    const bitmap = { width: 4, height: 3 };
+    let seen = null;
+    const result = await PhotoRefresh.refresh(blob, { mode, seed: 5 }, {
+      decode: async got => {
+        assert.equal(got, blob);
+        return bitmap;
+      },
+      draw: async (map, got, options) => {
+        assert.equal(map, bitmap);
+        assert.equal(options.mode, mode);
+        seen = got;
+        return drawn;
+      },
+    });
+    assert.equal(result, drawn);
+    assert.equal(seen.enabled, true);
+    assert.equal(seen.border !== null, bordered);
+  }
+});
+
+test('refresh replays the same spec for the same explicit seed', async () => {
+  const seen = [];
+  for (let i = 0; i < 2; i++) {
+    await PhotoRefresh.refresh(new Blob(['original']), { mode: 'bordered', seed: 42 }, {
+      decode: async () => ({ width: 4, height: 3 }),
+      draw: async (map, got) => {
+        seen.push(got);
+        return new Blob(['drawn']);
+      },
+    });
+  }
+  assert.deepEqual(seen[0], seen[1]);
+});

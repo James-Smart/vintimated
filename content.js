@@ -103,6 +103,7 @@
   const REFUSAL_LOG_KEY = 'vintimated:refusalLog';
   const ENABLED_KEY = 'vintimated:enabled';
   const LANG_KEY = 'vintimated:lang';
+  const PHOTO_REFRESH_KEY = 'vintimated:photoRefresh';
   const DB_NAME = 'vintimated';
   const DB_STORE = 'photos';
 
@@ -1019,6 +1020,15 @@
     return new Blob([relayed.buffer], { type: relayed.contentType || 'image/jpeg' });
   }
 
+  // How the photos are treated on the way up, as the popup last left it.
+  // Anything the panel never wrote — a later version's value, a hand-edited
+  // store — reads as 'bordered', the default: it is the mode that refreshes
+  // and can prove it did.
+  async function photoRefreshMode() {
+    const mode = await readSetting(PHOTO_REFRESH_KEY, 'bordered');
+    return PhotoRefresh.MODES.includes(mode) ? mode : 'bordered';
+  }
+
   // ===========================================================================
   // Styling and page furniture
   // ===========================================================================
@@ -1691,8 +1701,8 @@
   // Publishing a pending relist
   // ===========================================================================
 
-  // Photo ids belong to an upload session and go stale. When they do, the bytes
-  // kept on disk are sent again under a fresh session.
+  // Photo ids belong to an upload session and go stale. When they do, the
+  // bytes kept on disk are refreshed and sent again under a fresh session.
   async function refreshPhotos(csrf, itemId) {
     const blobs = await takePhotos(itemId);
     if (!blobs || !blobs.length) return null;
@@ -1700,7 +1710,10 @@
     const sessionId = randomUuid();
     const assigned = [];
     for (const blob of blobs) {
-      const stored = await sendPhoto(csrf, blob, sessionId);
+      // The bytes on disk stay pristine; what goes up is refreshed at send
+      // time, under the setting as it stands now, like any other relist.
+      const outgoing = await PhotoRefresh.refresh(blob, { mode: await photoRefreshMode() });
+      const stored = await sendPhoto(csrf, outgoing, sessionId);
       if (stored && stored.id) assigned.push({ id: stored.id, orientation: stored.orientation || 0 });
     }
     return assigned.length ? { sessionId, assigned } : null;
@@ -2341,8 +2354,14 @@
         if (blobs.length || failures) await step(pace);
         try {
           const blob = await grabPhoto(url);
+          // What Vinted is sent and what the copy keeps are not the same
+          // bytes: the photo is refreshed on the way up, so the relist never
+          // hands Vinted the original twice, while the pristine one is what
+          // stays in blobs — the recovery download and the re-upload want the
+          // photo as it was, not as it travelled.
+          const outgoing = await PhotoRefresh.refresh(blob, { mode: await photoRefreshMode() });
           blobs.push(blob);
-          const stored = await sendPhoto(csrf, blob, sessionId);
+          const stored = await sendPhoto(csrf, outgoing, sessionId);
           if (stored && stored.id) {
             assigned.push({ id: stored.id, orientation: stored.orientation || 0 });
           }

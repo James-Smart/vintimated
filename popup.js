@@ -23,6 +23,7 @@ const LOCAL_DRAFTS_KEY = 'vintimated:localDrafts';
 const RELIST_LOG_KEY = 'vintimated:relistLog';
 const BLOCK_KEY = 'vintimated:blockedUntil';
 const ENABLED_KEY = 'vintimated:enabled';
+const PHOTO_REFRESH_KEY = 'vintimated:photoRefresh';
 
 // These have to agree with content.js, which is the side that enforces them.
 // The popup only reports, sets, and — for the pause — lifts.
@@ -41,6 +42,20 @@ const VINTED_HOST = /(^|\.)vinted\.[a-z]{2,3}(\.[a-z]{2})?$/i;
 // strings.js and _locales and nothing else — a list kept by hand is a list that
 // disagrees with the catalogue the first time somebody forgets it.
 const LANGS = ['auto', ...Object.keys(VintimatedText.CATALOG)];
+
+// The photo-refresh modes and the help line each one earns under the label.
+// The mode names are not in the catalogue — they are the setting's own three
+// values, written the way the popup's select offers them — so the keys map
+// from the stored value rather than translate it. The modes here have to agree
+// with PhotoRefresh.MODES in photo-refresh.js, which the page enforces and
+// this panel only offers.
+const PHOTO_HELP = {
+  off: 'setting.photoRefresh.off.help',
+  stealth: 'setting.photoRefresh.stealth.help',
+  bordered: 'setting.photoRefresh.bordered.help',
+};
+const PHOTO_MODES = Object.keys(PHOTO_HELP);
+const PHOTO_DEFAULT = 'bordered';
 
 // Lucide paths. Stroke, width and colour come from the .icon rule, so the two
 // glyphs stay the same weight as each other.
@@ -310,6 +325,11 @@ async function readStored() {
     // that value and would sit blank, saying nothing about the language the
     // page is actually in.
     lang: LANGS.includes(bag[LANG_KEY]) ? bag[LANG_KEY] : 'auto',
+    // One of the three photo-refresh modes, validated the way the language
+    // is: a value this panel does not offer reads as the default rather than
+    // leaving the select blank, saying nothing about how the photos are being
+    // treated.
+    photoRefresh: PHOTO_MODES.includes(bag[PHOTO_REFRESH_KEY]) ? bag[PHOTO_REFRESH_KEY] : PHOTO_DEFAULT,
   };
 }
 
@@ -614,6 +634,7 @@ const SETTING_DEFAULTS = {
   reload: true,
   cooldown: true,
   paced: true,
+  photoRefresh: PHOTO_DEFAULT,
 };
 
 // Writes the value and keeps the checkbox honest: if the write fails the box
@@ -663,6 +684,38 @@ function wireGuarded(id, key, on, risky, warning, after, valueOf = checked => ch
     box.checked = risky;
     await commit(box, key, valueOf(risky));
     after(box.checked);
+  });
+}
+
+// The photo-refresh row is a choice rather than a switch: three answers, and
+// the help line under the label is redrawn to the one belonging to the answer
+// picked. A failed write puts the select back where it was rather than showing
+// a setting that is not stored — the same bargain commit() offers a checkbox,
+// which cannot be struck here because the box holds a value, not a state.
+//
+// The help line keeps its data-i18n in step with the answer, so a language
+// change repaints it in the new language like any other marked node and this
+// row never has to hear about the language at all.
+function wirePhotoRefresh(id, key, value, after) {
+  const box = document.getElementById(id);
+  const hint = document.getElementById('photo-refresh-hint');
+  const paint = () => {
+    hint.dataset.i18n = PHOTO_HELP[value];
+    hint.textContent = VintimatedText.t(PHOTO_HELP[value]);
+  };
+  box.value = value;
+  paint();
+  box.addEventListener('change', async () => {
+    const before = value;
+    try {
+      await ext.storage.local.set({ [key]: box.value });
+    } catch (_) {
+      box.value = before;
+      return;
+    }
+    value = box.value;
+    paint();
+    after(value);
   });
 }
 
@@ -736,6 +789,11 @@ function wireSettings(stored) {
     accept: VintimatedText.t('popup.risk.pace.accept'),
     cancel: VintimatedText.t('popup.risk.pace.cancel'),
   }), note('paced'), checked => (checked ? 'safe' : 'fast'));
+
+  // The page reads this fresh on every photo it sends, so writing it here is
+  // all the wiring the setting needs. It wires itself because the row carries
+  // a help line the switches have no use for.
+  wirePhotoRefresh('photo-refresh-select', PHOTO_REFRESH_KEY, stored.photoRefresh, note('photoRefresh'));
 
   // The badge is the one thing in the drawer written in the language rather
   // than in switch positions, so whoever changes the language has to be able to
