@@ -18,7 +18,8 @@ button.
 Vintimated is a fork of Bumpline 1.1.4 by
 [g1ampy](https://github.com/g1ampy/Bumpline), Copyright (C) 2026 g1ampy,
 licensed under the GNU General Public License v3.0. Upstream's copyright
-headers are preserved in every source file; Vintimated's changes are marked
+headers are preserved in every file that carried one; Vintimated's changes are
+marked
 `Modifications Copyright (C) 2026 Vintimated contributors.` and are
 distributed under the same license.
 
@@ -350,7 +351,8 @@ buttons, and the same rule that nothing is deleted until the copy exists.
   until when, the pending relists stop retrying themselves, and everything comes
   back on its own. Fifteen minutes for a `429`, thirty for a challenge, doubling
   for each further refusal that day up to six hours, and Vinted's own
-  `Retry-After` wins whenever it asks for longer. Nothing is lost in the
+  `Retry-After` wins whenever it is longer than the backoff, up to the same
+  six-hour cap. Nothing is lost in the
   meantime — an unfinished relist keeps its copy and resumes afterwards — and
   the popup can lift the pause early behind the same confirmation as the risky
   settings, for the times it was really a logged-out session or one bad network

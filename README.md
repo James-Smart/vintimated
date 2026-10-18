@@ -93,8 +93,9 @@ The safety rules of Bumpline are preserved and extended to bulk runs:
 - **Stop on refusal.** When Vinted answers 429 or challenges the browser, the
   extension stands down: 15 minutes for a 429, 30 for a 403, doubling with
   each further refusal inside a day, capped at 6 hours (Vinted's own
-  Retry-After wins when it asks for longer). A bulk queue halts the same way,
-  leaving the remaining items untouched.
+  Retry-After wins when it is longer than the backoff, up to the same 6-hour
+  cap). A bulk queue halts the same way, leaving the remaining items
+  untouched.
 
 ### Pacing defaults — and why they stay on
 
@@ -136,7 +137,7 @@ Vintimated is a fork of [Bumpline by g1ampy](https://github.com/g1ampy/Bumpline)
 a one-click Vinted relister. Bumpline is Copyright (C) 2026 g1ampy and is
 licensed under the [GNU General Public License v3.0](LICENSE); Vintimated is
 distributed under the same license. Upstream's copyright headers are preserved
-in every source file, and changes are marked
+in every file that carried one, and changes are marked
 `Modifications Copyright (C) 2026 Vintimated contributors.`
 
 ## Risk and terms of service

@@ -141,8 +141,8 @@
   const LOG_WINDOW_MS = DAY_WINDOW_MS;
 
   // What a refusal costs before anything may be sent again, doubling for each
-  // further refusal inside a day. Vinted's own Retry-After wins when it asks
-  // for longer.
+  // further refusal inside a day. Vinted's own Retry-After wins when it is
+  // longer than the backoff, but the cap below is the last word either way.
   const BLOCK_BASE_MS = { 429: 15 * 60 * 1000, 403: 30 * 60 * 1000 };
   const BLOCK_CAP_MS = 6 * 60 * 60 * 1000;
 

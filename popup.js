@@ -1,4 +1,5 @@
 // Bumpline — toolbar popup.
+// Derived from Bumpline by g1ampy — GPL-3.0.
 // Modifications Copyright (C) 2026 Vintimated contributors.
 //
 // Installed from the store the extension is otherwise invisible: it works only
