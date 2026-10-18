@@ -3,6 +3,9 @@ Thumbs.db
 *.zip
 build/
 .claude/
-docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/specs/
+!docs/superpowers/plans/
+.superpowers/
 store/listing.md
 /listing*.txt
