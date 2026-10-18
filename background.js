@@ -327,14 +327,17 @@ Promise.resolve(ext.runtime.setUninstallURL(SITE + '/issues'))
 // decides whether to: a knock is only ever a knock.
 //
 // Five message types join the relay above. The four that come in are each
-// answered with the same two things — the state as it now stands and the
+// answered with the same things — the state as it now stands and the
 // definition it runs, lifted out beside it for callers that only want the
-// settings:
+// settings — plus the tabId of the tab that asked. The tabId is the one fact
+// a content script cannot learn on its own, and the engine needs it to claim
+// the lease in its own name; a caller with no tab (the popup) simply gets
+// null there:
 //
-//   vintimated:schedule.start    { defn }  -> { state, defn }  begin a run
-//   vintimated:schedule.stop               -> { state, defn }  end the period
-//   vintimated:schedule.abort              -> { state, defn }  cancel the run
-//   vintimated:schedule.status             -> { state, defn }  just the books
+//   vintimated:schedule.start    { defn }  -> { state, defn, tabId }  begin a run
+//   vintimated:schedule.stop               -> { state, defn, tabId }  end the period
+//   vintimated:schedule.abort              -> { state, defn, tabId }  cancel the run
+//   vintimated:schedule.status             -> { state, defn, tabId }  just the books
 //
 // The fifth, vintimated:schedule.wake, only ever goes out: it is the alarm's
 // knock on a wardrobe tab, and the tab that hears it — the engine, in
@@ -399,23 +402,94 @@ function wakeWardrobeTabs() {
 
 ext.alarms.onAlarm.addListener(alarm => {
   if (!alarm || alarm.name !== WAKE_ALARM) return;
-  wakeWardrobeTabs();
+  // Off means off: no knock goes round while the extension is switched off.
+  if (!switchedOn) return;
+  // A knock keeps house as well as rap: the engine tab is put back on the
+  // wardrobe if it has wandered off, or reopened if it is gone, before the
+  // knock goes round — a wake that finds it elsewhere re-navigates it.
+  ensureEngineTab().then(() => wakeWardrobeTabs());
 });
 
-// TASK 4 HOOK — the engine tab. A run needs one wardrobe tab to live in, and
-// the whole dance — adopt the wardrobe tab that is open or open the remembered
-// profile, keep the tab on the wardrobe, close it when the run is over — is
-// Task 4's to write. Until then this is the smallest honest version: a
-// wardrobe tab already open is the engine tab, and where there is none the
-// remembered profile is opened to be one.
-async function ensureEngineTab() {
+// The engine tab: the one wardrobe tab a run lives in. The claim's tabId is
+// what names it — the same vintimated:schedule.lease the content engine takes
+// the floor with — so there is one answer to "which tab is the engine" and it
+// survives the worker being torn down between knocks. The tab is pinned to
+// the wardrobe: a wake that finds it somewhere else puts it back on the
+// remembered profile. It is closed for good when the run leaves 'running' —
+// stop, abort or a period that ran out — or when the extension is switched
+// off (closeEngineTab below).
+
+// On the wardrobe when on a Vinted member page — exactly the pages the
+// content script is injected into, where currentMemberId() and the
+// enumeration ladder keep their footing.
+function onWardrobe(url) {
+  if (!onVinted(url)) return false;
   try {
-    const tabs = await ext.tabs.query({ url: WARDROBE_URL_PATTERNS });
-    if (tabs.length) return;
-    const bag = await ext.storage.local.get([LAST_PROFILE_KEY]);
-    if (bag[LAST_PROFILE_KEY]) await ext.tabs.create({ url: bag[LAST_PROFILE_KEY] });
+    return new URL(url).pathname.startsWith('/member/');
+  } catch (_) {
+    return false;
+  }
+}
+
+async function ensureEngineTab() {
+  // Off means off: no engine tab is opened or kept while the extension is
+  // switched off.
+  if (!switchedOn) return null;
+  try {
+    const bag = await ext.storage.local.get([SCHEDULE_LEASE_KEY, LAST_PROFILE_KEY]);
+    const lease = bag[SCHEDULE_LEASE_KEY];
+    const home = bag[LAST_PROFILE_KEY];
+
+    // The tab the claim names is the engine for as long as the claim lasts.
+    let tab = null;
+    if (Scheduler.leaseValid(lease, Date.now()) && lease.tabId != null) {
+      tab = await ext.tabs.get(lease.tabId).catch(() => null);
+    }
+    if (tab) {
+      // Pinned to the wardrobe: a wake that finds the engine somewhere else
+      // navigates it back to the remembered profile.
+      if (home && !onWardrobe(tab.url)) {
+        tab = (await ext.tabs.update(tab.id, { url: home })) || tab;
+      }
+      return tab;
+    }
+
+    // No engine to keep: adopt a wardrobe tab already open — the run lives
+    // there — or open the remembered profile to be one. Quietly: the tab is
+    // the scheduler's engine room, not something the seller asked to see.
+    const [adopted] = await ext.tabs.query({ url: WARDROBE_URL_PATTERNS });
+    tab = adopted || (home ? await ext.tabs.create({ url: home, active: false }) : null);
+    if (tab && tab.id != null) {
+      // Named from the first moment, so a run stopped ten seconds after it
+      // started still knows which tab to close. The tab then renews the claim
+      // itself as it works.
+      await ext.storage.local.set({
+        [SCHEDULE_LEASE_KEY]: Scheduler.renewLease(Date.now(), tab.id),
+      });
+    }
+    return tab;
   } catch (err) {
     console.debug('[Vintimated] could not give the schedule its engine tab', err);
+    return null;
+  }
+}
+
+// The engine tab, closed for good: the run has left 'running', or the
+// extension is switched off. The claim goes with it — a tab that is gone must
+// not go on naming itself the engine — so a later start begins the dance
+// again.
+async function closeEngineTab() {
+  try {
+    const bag = await ext.storage.local.get([SCHEDULE_LEASE_KEY]);
+    const lease = bag[SCHEDULE_LEASE_KEY];
+    await ext.storage.local.remove(SCHEDULE_LEASE_KEY);
+    if (lease && lease.tabId != null) {
+      // A tab already gone is not a failure worth more than a debug line.
+      Promise.resolve(ext.tabs.remove(lease.tabId))
+        .catch(err => console.debug('[Vintimated] could not close the engine tab', err));
+    }
+  } catch (err) {
+    console.debug('[Vintimated] could not close the schedule engine tab', err);
   }
 }
 
@@ -439,23 +513,26 @@ async function writeSchedule(state) {
   }
 }
 
-// Every answer, the same shape.
-function scheduleAnswer(state) {
-  return { state, defn: state.defn };
+// Every answer, the same shape — and the asking tab named in it as well: the
+// engine claims the lease with its own id, and a content script has no other
+// way to learn which tab it is.
+function scheduleAnswer(state, sender) {
+  const tabId = sender && sender.tab && sender.tab.id != null ? sender.tab.id : null;
+  return { state, defn: state.defn, tabId };
 }
 
-async function scheduleStatus() {
-  return scheduleAnswer(await readSchedule());
+async function scheduleStatus(sender) {
+  return scheduleAnswer(await readSchedule(), sender);
 }
 
 // A start is the form's defn turned into a run: the state machine draws the
 // period from now, and the alarm and the engine tab follow the books. A start
 // that lands on a running schedule begins the clean run transition defines —
 // one alarm, one tab, never two of either.
-async function scheduleStart(defn) {
+async function scheduleStart(defn, sender) {
   // A message that carries no definition is not a start: the caller gets the
   // books back and no run is invented out of a malformed message.
-  if (!defn || typeof defn !== 'object' || Array.isArray(defn)) return scheduleStatus();
+  if (!defn || typeof defn !== 'object' || Array.isArray(defn)) return scheduleStatus(sender);
   const state = Scheduler.transition(await readSchedule(), {
     type: 'start',
     defn,
@@ -464,49 +541,47 @@ async function scheduleStart(defn) {
   await writeSchedule(state);
   await syncScheduleAlarm();
   await ensureEngineTab();
-  return scheduleAnswer(state);
+  return scheduleAnswer(state, sender);
 }
 
 // Stop and abort differ only in what the transition wipes — stop keeps the
 // period's books, abort clears them — so one handler carries both verbs. The
-// lease goes with either: the tab that held the floor held it for a run that
-// is over. A stop or abort that finds no definition to act on writes nothing
-// at all, so the books only ever hold a state deserialize would believe.
-async function scheduleEnd(verb) {
+// engine tab goes with either: the tab that held the floor held it for a run
+// that is over, and no wardrobe tab is left holding one (the period running
+// out reaches this same door, the engine asking for the stop on its own). A
+// stop or abort that finds no definition to act on writes nothing at all, so
+// the books only ever hold a state deserialize would believe.
+async function scheduleEnd(verb, sender) {
   let state = await readSchedule();
   if (state.defn != null) {
     state = Scheduler.transition(state, { type: verb, now: Date.now() });
     await writeSchedule(state);
   }
-  try {
-    await ext.storage.local.remove(SCHEDULE_LEASE_KEY);
-  } catch (err) {
-    console.debug('[Vintimated] could not drop the schedule lease', err);
-  }
+  await closeEngineTab();
   await syncScheduleAlarm();
-  return scheduleAnswer(state);
+  return scheduleAnswer(state, sender);
 }
 
-ext.runtime.onMessage.addListener((message, _sender, respond) => {
+ext.runtime.onMessage.addListener((message, sender, respond) => {
   if (!message || !message.type) return false;
 
   if (message.type === 'vintimated:schedule.start') {
-    scheduleStart(message.defn).then(respond);
+    scheduleStart(message.defn, sender).then(respond);
     return true; // the reply is asynchronous
   }
 
   if (message.type === 'vintimated:schedule.stop') {
-    scheduleEnd('stop').then(respond);
+    scheduleEnd('stop', sender).then(respond);
     return true;
   }
 
   if (message.type === 'vintimated:schedule.abort') {
-    scheduleEnd('abort').then(respond);
+    scheduleEnd('abort', sender).then(respond);
     return true;
   }
 
   if (message.type === 'vintimated:schedule.status') {
-    scheduleStatus().then(respond);
+    scheduleStatus(sender).then(respond);
     return true;
   }
 
@@ -515,9 +590,13 @@ ext.runtime.onMessage.addListener((message, _sender, respond) => {
 
 // The engine tab writes the books as it works, and the alarm follows the
 // state rather than whoever last asked for something: a worker torn down
-// between a firing and its consequence comes back to the same truth.
+// between a firing and its consequence comes back to the same truth. The
+// switch off is the one change that reaches past the books to the tab: an
+// extension that is off keeps no engine room open, and the books stay put
+// until the seller comes back or stops the run.
 ext.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !changes) return;
+  if (ENABLED_KEY in changes && changes[ENABLED_KEY].newValue === false) closeEngineTab();
   if (SCHEDULE_KEY in changes) syncScheduleAlarm();
 });
 

@@ -3129,6 +3129,204 @@
   }
 
   // ===========================================================================
+  // The schedule engine
+  //
+  // A knock (vintimated:schedule.wake) or a page load with a run on the books
+  // is all this ever is: take the floor, ask Scheduler.decide what the moment
+  // has earned, and spend it on at most one relist. One wake is one decision
+  // and never a backlog — two days of closed browser are two days missed, not
+  // a queue to empty on the way back. The arithmetic lives in scheduler.js,
+  // the feed above answers 'which item', and everything here is glue between
+  // the two and runRelist.
+  //
+  // The floor is the lease — { tabId, until } under vintimated:schedule.lease,
+  // written with Scheduler.renewLease and believed with Scheduler.leaseValid.
+  // Every wardrobe tab hears every knock; only the tab the lease names acts,
+  // and a second knock during an in-flight relist finds the floor held (by
+  // this very tab) and does nothing. The claim is taken at each step and
+  // again just before the relist, so a long walk never loses the floor
+  // mid-relist, and a tab that goes away stops holding up the next one within
+  // its five minutes.
+  //
+  // The schedule never prompts. A firing that would cross the volume alarms
+  // holds and skips — nothing asked, nothing recorded — and the next wake
+  // simply re-decides. The relist goes in with budgetPreapproved precisely
+  // because that pre-check is the same arithmetic the gate would have done.
+  // ===========================================================================
+
+  const SCHEDULE_KEY = 'vintimated:schedule';
+  const SCHEDULE_LEASE_KEY = 'vintimated:schedule.lease';
+
+  // The card a firing scrolls to, when the item is on this page at all.
+  const engineCard = id => document.querySelector(`[data-testid="product-item-id-${id}"]`);
+
+  // One step at a time per tab: a second knock during an in-flight relist
+  // finds the floor held — by this very tab — and goes away again.
+  let engineWorking = false;
+
+  // The floor, taken or renewed. A live claim by another tab is not stolen —
+  // that tab is mid-work and its own knock will come — so the caller stands
+  // down and waits its turn. The claim is read back before it is believed:
+  // two tabs hearing the same knock both write, and the read-back is what
+  // tells the loser it lost.
+  async function claimFloor(tabId) {
+    try {
+      const held = await readSetting(SCHEDULE_LEASE_KEY, null);
+      if (Scheduler.leaseValid(held, Date.now()) && held.tabId !== tabId) return null;
+      const lease = Scheduler.renewLease(Date.now(), tabId);
+      await ext.storage.local.set({ [SCHEDULE_LEASE_KEY]: lease });
+      const kept = await readSetting(SCHEDULE_LEASE_KEY, null);
+      return kept && kept.tabId === tabId && Scheduler.leaseValid(kept, Date.now()) ? kept : null;
+    } catch (err) {
+      trace('could not claim the schedule floor', err);
+      return null;
+    }
+  }
+
+  // One knock's worth of work — or one page load's; both ask the same
+  // question at different moments. At most one relist comes out of it,
+  // however long it has been since the last.
+  async function runEngine() {
+    if (engineWorking) return;
+    engineWorking = true;
+    try {
+      // Off means off here as everywhere else: nothing is sent to Vinted.
+      if (enabled !== true) return;
+
+      // A walk or a relist already in hand is this tab's own work; the
+      // schedule waits its turn rather than doubling the traffic.
+      if (bulkQueue || relistInFlight.size) {
+        trace('schedule: a relist is already in hand; standing down');
+        return;
+      }
+
+      // The books and this tab's own id in one round trip: the answer names
+      // the asking tab because a content script cannot learn it alone.
+      const { state, defn, tabId } = await askWorker({ type: 'vintimated:schedule.status' });
+      if (!state || state.status !== 'running' || !defn || tabId == null) return;
+
+      // The floor. Only the tab the lease names goes on from here.
+      if (!(await claimFloor(tabId))) {
+        trace('schedule: the floor is held elsewhere');
+        return;
+      }
+
+      // The shared relist log is the day's true count: a manual relist has
+      // exactly the weight of a scheduled one in the cap decide reads.
+      const log = await relistLog();
+      const decision = Scheduler.decide(defn, Date.now(), {
+        lastFireAt: state.lastFireAt,
+        todayCount: countWithin(log, DAY_WINDOW_MS),
+        pausedUntil: state.pausedUntil,
+        nextDueAt: state.nextDueAt,
+      });
+      if (decision.action !== 'fire') {
+        // A period that has run out is a run that has left 'running': the
+        // stop message ends the books, drops the lease and closes the engine
+        // tab. Every other wait is simply the next knock's business.
+        if (decision.reason === 'period-over') {
+          await askWorker({ type: 'vintimated:schedule.stop' });
+        } else {
+          trace('schedule: waiting —', decision.reason);
+        }
+        return;
+      }
+
+      // --- the budget pre-check, and the only gate between the decision and
+      // the relist. The counts come off the one shared relistLog — a manual
+      // relist counts exactly like a scheduled one — and a hold is silent: no
+      // dialog, nothing recorded, and the next wake simply re-decides.
+      const counts = {
+        thisHour: countWithin(await relistLog(), HOUR_WINDOW_MS),
+        today: countWithin(await relistLog(), DAY_WINDOW_MS),
+      };
+      const hold = Scheduler.holdForBudget(counts);
+      if (hold.hold) {
+        trace('schedule: holding for the', hold.until, 'budget');
+        return;
+      }
+
+      // --- the pick. Nothing eligible is not a failure: the books stand as
+      // they are, nothing is recorded, and a later knock asks again.
+      const next = await nextEligibleItem();
+      if (!next) {
+        trace('schedule: nothing eligible to relist');
+        return;
+      }
+      // The feed's id is already the String(id) form; it goes to the fire
+      // event below exactly as it came.
+      const id = next.id;
+
+      // A period touches each item once. The ids it has already relisted come
+      // off the books and are normalized to strings before the compare — ids
+      // are strings end to end.
+      const doneIds = new Set(state.doneIds.map(String));
+      if (doneIds.has(String(id))) {
+        trace('schedule:', id, 'was already relisted this period');
+        return;
+      }
+
+      // Checked with leaseValid at the last possible moment: the pick's walk
+      // can take a while, and a tab that lost the floor in the meantime must
+      // not fire. Taking the claim again also renews it over the relist to
+      // come, so a busy engine never loses the floor mid-relist.
+      const floor = await claimFloor(tabId);
+      if (!floor || !Scheduler.leaseValid(floor, Date.now())) {
+        trace('schedule: lost the floor before firing');
+        return;
+      }
+
+      const ok = await runRelist(id, 'publish', {
+        label: text => trace('schedule:', text),
+        busy: () => {},
+        card: () => engineCard(id),
+        reload: false,
+        budgetPreapproved: true,
+      });
+
+      // A relist that did not come through is recorded as nothing: no fire
+      // event, no done id, the gap left where it stands — so the next knock
+      // can simply try again.
+      if (!ok) {
+        trace('schedule: the relist of', id, 'did not finish; nothing recorded');
+        return;
+      }
+
+      // --- the books. The gap is drawn once here and carried in the event,
+      // so no later decision can redraw the wait it is checking, and the
+      // state goes back where the background's alarm follows it.
+      const fired = Scheduler.transition(state, {
+        type: 'fire',
+        now: Date.now(),
+        id,
+        gapMs: Scheduler.nextGapMs(defn, Math.random),
+      });
+      try {
+        // Only a run still going is written over: a stop that landed while
+        // the relist was in hand must not be talked back into 'running'.
+        const current = await readSetting(SCHEDULE_KEY, null);
+        if (current && Scheduler.deserialize(current).status === 'running') {
+          await ext.storage.local.set({ [SCHEDULE_KEY]: Scheduler.serialize(fired) });
+        }
+      } catch (err) {
+        trace('could not write the schedule', err);
+      }
+    } catch (err) {
+      trace('the schedule engine broke', err);
+    } finally {
+      engineWorking = false;
+    }
+  }
+
+  // The background's minute alarm knocks here; the knock is only ever a
+  // knock, and no reply is expected of it.
+  ext.runtime.onMessage.addListener(message => {
+    if (!message || message.type !== 'vintimated:schedule.wake') return false;
+    runEngine();
+    return false;
+  });
+
+  // ===========================================================================
   // Wiring the buttons into the page
   // ===========================================================================
 
@@ -3243,6 +3441,11 @@
   // later.
   readLanguage().then(applyLanguage);
   // The switch decides whether there is anything to draw at all, so it is read
-  // before the first attempt rather than after it.
-  readEnabled().then(applyEnabled);
+  // before the first attempt rather than after it. Once it is known, a page
+  // load with a run on the books is a knock of its own: the same question the
+  // alarm asks, asked once on arrival.
+  readEnabled().then(on => {
+    applyEnabled(on);
+    runEngine();
+  });
 })();
