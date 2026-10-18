@@ -2232,8 +2232,11 @@
 
   // Ends a finished relist: reload, or take away the card of the listing that
   // no longer exists and say plainly that the rest of the page is stale.
-  async function settle(itemId, message) {
-    if (await reloadWanted()) {
+  // options.reload === false means the caller is holding the page still on
+  // purpose — a queue working through several listings — so the setting is not
+  // asked and only the card goes.
+  async function settle(itemId, message, options = {}) {
+    if (options.reload !== false && (await reloadWanted())) {
       toast(T('toast.reloading', message));
       setTimeout(() => location.reload(), 1200);
       return;
@@ -2246,13 +2249,14 @@
   // The relist itself
   // ===========================================================================
 
-  async function relist(button, mode) {
-    const itemId = itemIdFor(button);
-    if (!itemId) {
-      toast(T('toast.cantFindItem'), 'bad');
-      return;
-    }
-
+  // The whole relist without a button in it. The caller hands over the item,
+  // the mode, and the hooks that stand in for a button: label(text) for the
+  // progress a label would have shown, busy(true|false) for the disabled
+  // state, card() to name the on-screen card worth looking at (a run with no
+  // card passes nothing), and reload: false to hold the page still when the
+  // run settles. relist below is the button's thin wrapper over this; a queue
+  // can drive the same run with no button at all.
+  async function runRelist(itemId, mode, hooks) {
     // An unfinished relist means an original is already gone. Finish that
     // before starting anything new.
     const outstanding = await readPending(itemId);
@@ -2263,10 +2267,11 @@
     }
 
     const draftOnly = mode === 'draft';
-    const restingLabel = draftOnly ? T('button.draft') : T('button.relist');
+    // A run that asked for no reload says so here, once, and the two settles
+    // below pass it on.
+    const settleOptions = hooks.reload === false ? { reload: false } : undefined;
 
-    button.disabled = true;
-    button.classList.add('is-busy');
+    hooks.busy(true);
 
     try {
       // --- the gate. Nothing below it sends a request, so stopping here costs
@@ -2285,7 +2290,7 @@
 
       const owed = await cooldownLeft();
       for (let left = Math.ceil(owed / 1000); left > 0; left--) {
-        setButtonLabel(button, T('button.cooldown', left));
+        hooks.label(T('button.cooldown', left));
         await pause(1000);
       }
 
@@ -2297,7 +2302,7 @@
       const overDay = today >= DAY_ALARM_AT;
 
       if (overDay || thisHour >= HOUR_ALARM_AT) {
-        setButtonLabel(button, T('button.waiting'));
+        hooks.label(T('button.waiting'));
         const carryOn = await askToContinue({
           title: overDay ? T('budget.title.day') : T('budget.title.hour'),
           body: overDay
@@ -2314,14 +2319,16 @@
 
       // Scroll to the item card, as a person would look at what they are
       // about to relist. scrollIntoView generates real scroll events that
-      // are indistinguishable from a user scrolling.
-      const card = button.closest(SELECTOR.card);
+      // are indistinguishable from a user scrolling. The card is asked for
+      // through the hooks: only a button knows where its card lives, and a
+      // run without one has nothing to scroll to.
+      const card = hooks.card ? hooks.card() : null;
       if (card) {
         card.scrollIntoView({ behavior: 'smooth', block: 'center' });
         await pause(between(800, 2000));
       }
 
-      setButtonLabel(button, T('button.relisting'));
+      hooks.label(T('button.relisting'));
 
       // Visit the item page through the bridge. This creates a page-view
       // event in Vinted's analytics — the navigation a real user would
@@ -2389,7 +2396,7 @@
         throw new Error(T('relist.error.noCondition'));
       }
 
-      setButtonLabel(button, T('button.checkingSize'));
+      hooks.label(T('button.checkingSize'));
       const size = await inspectSize(source, csrf);
       if (!size.ok) {
         if (!size.groups || !size.groups.length) {
@@ -2399,7 +2406,7 @@
           // instead of being appended as a literal.
           throw new Error(T('size.unavailable', size.why));
         }
-        setButtonLabel(button, T('button.waitingSize'));
+        hooks.label(T('button.waitingSize'));
         const chosen = await askForSize(size.groups, item.title, size.why);
         if (!chosen) throw new Error(T('size.cancelled'));
         item.size_id = chosen;
@@ -2407,7 +2414,7 @@
         snapshot.size_id = chosen;
       }
 
-      setButtonLabel(button, T('button.checking'));
+      hooks.label(T('button.checking'));
       await assertItemReachable(itemId, csrf);
 
       // --- the copy is put somewhere safe before the original is touched
@@ -2423,7 +2430,7 @@
       const localDrafts = (await readSetting(LOCAL_DRAFTS_KEY, true)) !== false;
       let draft = null;
       if (draftOnly || !localDrafts) {
-        setButtonLabel(button, T('button.savingDraft'));
+        hooks.label(T('button.savingDraft'));
         await step(pace);
         draft = await openDraft(csrf, item, sessionId);
       }
@@ -2445,7 +2452,7 @@
       // With no draft on Vinted the local copy is the only copy, so a failure
       // to write it has to stop the relist rather than be logged past: the
       // alternative is deleting a listing that then exists nowhere.
-      setButtonLabel(button, T('button.savingCopy'));
+      hooks.label(T('button.savingCopy'));
       try {
         await stashPhotos(itemId, blobs);
       } catch (err) {
@@ -2460,7 +2467,7 @@
       // Vinted too when a draft was opened above.
       // Deciding time: a real user pauses before the irreversible step.
       await pause(between(1000, 2500));
-      setButtonLabel(button, T('button.deleting'));
+      hooks.label(T('button.deleting'));
       await step(pace);
       try {
         await removeListing(csrf, itemId);
@@ -2478,33 +2485,57 @@
       if (draftOnly) {
         // The draft is the finished result, not something still pending.
         await forgetPending(itemId);
-        await settle(itemId, T('toast.originalDeletedDraft'));
+        await settle(itemId, T('toast.originalDeletedDraft'), settleOptions);
         return;
       }
 
-      setButtonLabel(button, T('button.publishing'));
+      hooks.label(T('button.publishing'));
       await step(pace);
       const newId = await advancePending(
         itemId,
         record,
         (attempt, total) => {
-          setButtonLabel(button, attempt === 1 ? T('button.publishing') : T('button.retrying', attempt, total));
+          hooks.label(attempt === 1 ? T('button.publishing') : T('button.retrying', attempt, total));
         },
         true,
       );
-      if (newId) await settle(itemId, T('toast.relisted'));
+      if (newId) await settle(itemId, T('toast.relisted'), settleOptions);
       // On failure advancePending has already stored the record and raised the
       // banner, and the next page load will try again.
     } catch (err) {
       console.error('[Vintimated]', err);
       toast(T('toast.relistStopped', (err && err.message) || err), 'bad');
     } finally {
-      button.disabled = false;
-      button.classList.remove('is-busy');
-      setButtonLabel(button, restingLabel);
-      // A refusal may have arrived mid-relist. Re-enabling the button above is
+      hooks.busy(false);
+      // A refusal may have arrived mid-relist. Re-enabling above is
       // unconditional, so the pause has to be put back over the top of it.
       paintLock();
+    }
+  }
+
+  // The button's share of a relist: find the item, hold the label and the
+  // busy state while runRelist works, and put the resting label back at the
+  // end. Everything else is runRelist's.
+  async function relist(button, mode) {
+    const itemId = itemIdFor(button);
+    if (!itemId) {
+      toast(T('toast.cantFindItem'), 'bad');
+      return;
+    }
+
+    const restingLabel = mode === 'draft' ? T('button.draft') : T('button.relist');
+
+    try {
+      await runRelist(itemId, mode, {
+        label: text => setButtonLabel(button, text),
+        busy: on => {
+          button.disabled = on;
+          button.classList.toggle('is-busy', on);
+        },
+        card: () => button.closest(SELECTOR.card),
+      });
+    } finally {
+      setButtonLabel(button, restingLabel);
     }
   }
 
