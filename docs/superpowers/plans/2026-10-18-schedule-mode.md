@@ -24,8 +24,8 @@
 
 ## Review Focus
 
-1. **A scheduled firing must never pop a dialog mid-browse** — hold-and-skip when the shared `relistLog` is near `HOUR_ALARM_AT`/`DAY_ALARM_AT`. Pinned by Task 4's hold-and-skip test.
-2. **Missed slots must never backfill** — two days of closed browser yield at most one firing on return, inside a window. Pinned by Task 1's `decide` tests and Task 3's single-fire-per-wake step.
+1. **A scheduled firing must never pop a dialog mid-browse** — hold-and-skip when the shared `relistLog` is near `HOUR_ALARM_AT`/`DAY_ALARM_AT`. Pinned by Task 3's hold-and-skip test.
+2. **Missed slots must never backfill** — two days of closed browser yield at most one firing on return, inside a window. Pinned by Task 1's `decide` tests and Task 4's single-fire-per-wake step.
 3. **The daily cap counts manual and scheduled relists alike** (shared `vintimated:relistLog`). Pinned by Task 1's capacity test with a pre-loaded count.
 4. **One firing scheduler across tabs** — a storage lease makes a stale or second engine tab inert. Pinned by Task 2's lease test.
 5. **Stop ends the period cleanly and Abort cancels outright** — no orphan engine tab, no zombie running state, form values preserved. Pinned by Task 1's transition tests and Task 5's manual checklist.
@@ -36,8 +36,8 @@
 
 | File | Role | Task |
 | --- | --- | --- |
-| `scheduler.js` | **create** — pure schedule logic: windows, gaps, caps, eligibility, state transitions, lease validation | 1, 2, 4 |
-| `test/scheduler.test.js` | **create** — `node --test` suite for the above | 1, 2, 4 |
+| `scheduler.js` | **create** — pure schedule logic: windows, gaps, caps, eligibility, state transitions, lease validation | 1, 2, 3 |
+| `test/scheduler.test.js` | **create** — `node --test` suite for the above | 1, 2, 3 |
 | `background.js` | modify — `chrome.alarms` wake, engine-tab open/adopt/close, popup↔engine message relay | 2, 3 |
 | `content.js` | modify — engine loop (decide → pick → `runRelist` → record), eligibility feed, running strip hook | 3, 4, 5 |
 | `popup.html`, `popup.js`, `popup.css` | modify — schedule form (validated knobs), Start/Stop/Abort, paused/running states | 5 |
@@ -59,10 +59,10 @@ Seams used (as they exist after the released 1.2.1): `runRelist(itemId, mode, ho
 - `Scheduler.isWithinWindow(defn, now) -> boolean` — `defn.days` (array of 0–6, Sun=0), `defn.fromMin`/`defn.toMin` (local minutes-of-day, `fromMin <= toMin`), `defn.endsAt` (ms timestamp): true only inside a day+hour window and before the period end.
 - `Scheduler.nextGapMs(defn, rand) -> number` — integer ms in `[defn.gapMinMs, defn.gapMaxMs]` using the injected `rand()` in [0,1).
 - `Scheduler.capacityLeft(defn, todayCount) -> number` — `Math.max(0, defn.maxPerDay - todayCount)`, never negative.
-- `Scheduler.decide(defn, now, ctx) -> { action: 'fire'|'wait', reason, waitMs }` — `ctx = { lastFireAt, todayCount, pausedUntil }`. Reasons in priority order: `'period-over'` (wait, waitMs 0), `'paused'` (wait until `pausedUntil`), `'outside-window'` (wait until the next window start, computed in local time), `'gap'` (wait until `lastFireAt + nextGap` is due — `nextGap` is drawn once per decision from `nextGapMs`), `'cap'` (wait until tomorrow's window start), `'fire'`. `action:'fire'` only when all gates pass.
+- `Scheduler.decide(defn, now, ctx) -> { action: 'fire'|'wait', reason, waitMs }` — `ctx = { lastFireAt, todayCount, pausedUntil, nextDueAt }`. Reasons in priority order: `'period-over'` (wait, waitMs 0), `'paused'` (wait until `pausedUntil`), `'outside-window'` (wait until the next window start, computed in local time), `'gap'` (wait until `ctx.nextDueAt` — the gap is drawn **once per firing** and stored in state, never redrawn per decision), `'cap'` (wait until tomorrow's window start), `'fire'`. `action:'fire'` only when all gates pass.
 - `Scheduler.eligible(defn) -> (item) => boolean` — `item = { ageDays, closed }`: `!closed && ageDays >= defn.ageThresholdDays`.
 - `Scheduler.inScope(defn, itemId, selection: Set) -> boolean` — `'all'` → true; `'selected'` → `selection.has(itemId)`.
-- `Scheduler.transition(state, event) -> state` — events: `{type:'start', defn, now}`, `{type:'fire', now, id}`, `{type:'stop', now}`, `{type:'abort', now}`, `{type:'pause', until}`, `{type:'resume', now}`. State: `{ status: 'idle'|'running'|'ended'|'cancelled', defn, startedAt, endsAt, lastFireAt, dayKey, dayCount, doneIds }`. `fire` increments `dayCount`, appends `id` to `doneIds`, rolls `dayKey`/`dayCount` on a new local day. `stop` → `ended` (keeps `defn`); `abort` → `cancelled` (clears `endsAt`/counters/`doneIds`, keeps `defn` for re-start).
+- `Scheduler.transition(state, event) -> state` — events: `{type:'start', defn, now}` (sets `nextDueAt = now`), `{type:'fire', now, id, gapMs}` (sets `lastFireAt = now`, `nextDueAt = now + gapMs`), `{type:'stop', now}`, `{type:'abort', now}`, `{type:'pause', until}`, `{type:'resume', now}`. State: `{ status: 'idle'|'running'|'ended'|'cancelled', defn, startedAt, endsAt, lastFireAt, nextDueAt, dayKey, dayCount, doneIds }`. `fire` increments `dayCount`, appends `id` to `doneIds`, rolls `dayKey`/`dayCount` on a new local day. `stop` → `ended` (keeps `defn`); `abort` → `cancelled` (clears `endsAt`/counters/`doneIds`, keeps `defn` for re-start).
 - `Scheduler.dayKey(now) -> string` — local `YYYY-MM-DD`.
 - `Scheduler.leaseValid(lease, now) -> boolean` — `{tabId, until}`: valid when `now < until`.
 - `Scheduler.serialize(state)` / `Scheduler.deserialize(raw)` — JSON round-trip; `deserialize` returns a fresh `idle` state for anything malformed.
@@ -71,9 +71,9 @@ Seams used (as they exist after the released 1.2.1): `runRelist(itemId, mode, ho
   - `isWithinWindow`: inside 18:00–21:00 on an allowed day → true; 17:59 and 21:00 → false; allowed hour on a disallowed day → false; after `endsAt` → false even in-window
   - `nextGapMs`: 50 draws land in `[gapMinMs, gapMaxMs]` for both `rand` extremes (0 and 0.999…)
   - `capacityLeft`: counts 0, `maxPerDay`, and over-cap all yield ≥ 0 with the right values
-  - `decide`, one test per reason: `period-over`, `paused`, `outside-window` (returns `waitMs` reaching exactly the next window start), `gap` (not due yet), `cap` (todayCount at cap → wait to next day), and `fire` when all gates pass
+  - `decide`, one test per reason: `period-over`, `paused`, `outside-window` (returns `waitMs` reaching exactly the next window start), `gap` (`now < ctx.nextDueAt` → wait exactly until it), `cap` (todayCount at cap → wait to next day), and `fire` when all gates pass
   - **no backfill:** `decide` after a 3-day gap in `now` returns exactly one `fire` (a single decision — no replay of missed slots is possible by construction)
-  - `transition`: start → running with `endsAt = now + periodMs`; fire increments `dayCount`, appends the fired `id` to `doneIds`, and rolls the day; stop → `ended` with `defn` kept; abort → `cancelled` with counters and `doneIds` cleared
+  - `transition`: start → running with `endsAt = now + periodMs` and `nextDueAt = now`; fire with `gapMs` sets `lastFireAt = now`, `nextDueAt = now + gapMs`, increments `dayCount`, appends the fired `id` to `doneIds`, and rolls the day; stop → `ended` with `defn` kept; abort → `cancelled` with counters and `doneIds` cleared
   - `eligible`: age below/above threshold; `closed` always false
   - `inScope`: `'all'` vs `'selected'` with a `Set`
   - `leaseValid`: before/after `until`
@@ -81,7 +81,7 @@ Seams used (as they exist after the released 1.2.1): `runRelist(itemId, mode, ho
 - [ ] **Step 2: Run tests to verify they fail**
   Run: `npm test`
   Expected: FAIL — `Cannot find module '../scheduler.js'`
-- [ ] **Step 3: Implement `scheduler.js`** — classic script IIFE assigning `const Scheduler = (() => { … })()` with the interface above plus the CommonJS guard. `decide` draws its gap once via `nextGapMs(defn, () => 0.5)`-style injected default `Math.random`; all time math uses `Date` methods on `now` (a `Date` or ms) in the seller's local timezone.
+- [ ] **Step 3: Implement `scheduler.js`** — classic script IIFE assigning `const Scheduler = (() => { … })()` with the interface above plus the CommonJS guard. The gap is drawn at fire time by the caller (`nextGapMs(defn, Math.random)`) and lands in `state.nextDueAt` via the `fire` event; `decide` only compares against it. All time math uses `Date` methods on `now` (a `Date` or ms) in the seller's local timezone.
 - [ ] **Step 4: Run tests to verify they pass**
   Run: `npm test`
   Expected: PASS (Task suites green)
@@ -124,47 +124,49 @@ Seams used (as they exist after the released 1.2.1): `runRelist(itemId, mode, ho
 
 ---
 
-### Task 3: Engine tab and the firing loop (content.js)
+### Task 3: Eligibility feed and hold-and-skip (content.js)
 
 **Files:**
-- Modify: `content.js` (engine loop + wake handler), `background.js` (engine-tab open/adopt/close)
+- Modify: `content.js` (feed + budget pre-check), `scheduler.js` (pure helpers), `test/scheduler.test.js`
 
 **Interfaces:**
-- Consumes: `Scheduler.decide/isWithinWindow/transition/serialize/deserialize/leaseValid/dayKey`, `runRelist(itemId, mode, hooks)`, `readBlock()`, `relistLog()`, `countWithin()`, `LAST_PROFILE_KEY`.
-- Produces: engine behavior — on `wake` or page load with a `running` schedule: claim/renew the lease (`vintimated:schedule.lease`), `Scheduler.decide(...)`, and on `'fire'`: pick one eligible item (Task 4's feed), run `runRelist(id, 'publish', { label, busy: () => {}, card: () => engineCard(id), reload: false, budgetPreapproved: true })`, `Scheduler.transition(state, { type: 'fire', now })`, persist. Exactly one firing per wake.
-- Produces: engine tab lifecycle — `start` opens `LAST_PROFILE_KEY`'s wardrobe if no wardrobe tab exists (or adopts one); the tab closes when the state leaves `running` (stop/abort/period end) or the extension is switched off.
-
-- [ ] **Step 1: Extract and test the pure parts** — `Scheduler.pickNext(items, defn, selection)` (append to `test/scheduler.test.js`): among `[{id, ageDays, closed}]`, return the first id passing `eligible` + `inScope` in input order; none → null. TDD: failing test first.
-- [ ] **Step 2: Implement the loop** — `wake` handler as described; **one firing per wake** (the no-backfill property); a second wake during an in-flight `runRelist` finds the lease held and does nothing. Engine tab is pinned to the wardrobe (if the seller navigates it away, the next wake re-navigates it to the remembered profile).
-- [ ] **Step 3: Verify**
-  Run: `npm test` and `node build.mjs`
-  Expected: PASS; both zips contain `scheduler.js`; `manifest.json` in the zips lists `alarms`.
-- [ ] **Step 4: Commit**
-  ```bash
-  git add content.js background.js scheduler.js test/scheduler.test.js
-  git commit -m "Schedule engine: lease-claimed firing loop on wake"
-  ```
-
----
-
-### Task 4: Eligibility feed and hold-and-skip (content.js)
-
-**Files:**
-- Modify: `content.js` (feed + budget pre-check), `scheduler.js` (pure predicate), `test/scheduler.test.js`
-
-**Interfaces:**
-- Consumes: `enumeratedIds()` ladder and its item payloads (which carry the fields `isCopyable` reads and the age source used by `paintAgeLabels`), `BulkQueue.filterEditable`, `relistLog()`, `countWithin()`, `HOUR_ALARM_AT`, `DAY_ALARM_AT`.
+- Consumes: `enumeratedIds()` ladder and its item payloads (which carry the fields `isCopyable` reads and the age source used by `paintAgeLabels`), `BulkQueue.filterEditable`, `relistLog()`, `countWithin()`, `HOUR_ALARM_AT`, `DAY_ALARM_AT`, Task 1's `Scheduler.eligible/inScope`.
+- Produces: `Scheduler.pickNext(items, defn, selection, doneIds) -> number|null` — among `[{id, ageDays, closed}]`, the first id passing `eligible` + `inScope` and not in `doneIds`, in input order; none → null (pure; tested here).
 - Produces: `Scheduler.holdForBudget(counts) -> { hold: boolean, until: 'hour'|'day'|null }` — pure; `counts = { thisHour, today }`: hold when `today + 1 > DAY_ALARM_AT` or `thisHour + 1 > HOUR_ALARM_AT` (the shared-log guarantee: manual relists count, since `relistLog` is one log).
-- Produces: feed — `nextEligibleItem()` in content.js: live ladder items filtered by `isCopyable`/`filterEditable`, `Scheduler.eligible(defn)` (age ≥ threshold), `Scheduler.inScope(defn, id, selection)`, and never an id already relisted by the schedule this period (`state.doneIds` — small array in the state, so a period relists each item at most once even if its age qualifies again after a shorter threshold).
+- Produces: feed — `nextEligibleItem()` in content.js: live ladder items (age ≥ threshold via `Scheduler.eligible`), scope via `Scheduler.inScope`, copyable via `isCopyable`/`filterEditable`, minus `state.doneIds`, resolved through `Scheduler.pickNext`. Returns `{ id, ageDays }` or null.
 
-- [ ] **Step 1: Write the failing test** for `holdForBudget`: at `DAY_ALARM_AT`-1 with room in the hour → not held; at `DAY_ALARM_AT` → held (`until: 'day'`); at `HOUR_ALARM_AT` with day room → held (`until: 'hour'`); manual relists already in the shared log (`today` high) → held.
+- [ ] **Step 1: Write the failing tests** (TDD, append to `test/scheduler.test.js`):
+  - `pickNext`: first eligible + in-scope id in input order; skips below-threshold, `closed`, out-of-scope, and `doneIds` members; none → null
+  - `holdForBudget`: at `DAY_ALARM_AT`-1 with room in the hour → not held; at `DAY_ALARM_AT` → held (`until: 'day'`); at `HOUR_ALARM_AT` with day room → held (`until: 'hour'`); manual relists already in the shared log (`today` high) → held
 - [ ] **Step 2: Run tests to verify they fail** — Run: `npm test` — Expected: FAIL
-- [ ] **Step 3: Implement `holdForBudget` + `nextEligibleItem` + `doneIds` bookkeeping** — on `hold`, the firing records nothing and the next wake re-decides (the `decide` gap already spaces attempts).
+- [ ] **Step 3: Implement `pickNext` + `holdForBudget` + `nextEligibleItem` + `doneIds` bookkeeping** — on `hold`, the firing records nothing and the next wake re-decides (the `decide` gap already spaces attempts).
 - [ ] **Step 4: Run tests to verify they pass** — Run: `npm test` — Expected: PASS
 - [ ] **Step 5: Commit**
   ```bash
   git add content.js scheduler.js test/scheduler.test.js
   git commit -m "Schedule feed: eligibility, scope, hold-and-skip budget gate"
+  ```
+
+---
+
+### Task 4: Engine tab and the firing loop (content.js)
+
+**Files:**
+- Modify: `content.js` (engine loop + wake handler), `background.js` (engine-tab open/adopt/close)
+
+**Interfaces:**
+- Consumes: `Scheduler.decide/isWithinWindow/transition/serialize/deserialize/leaseValid/dayKey/nextGapMs/renewLease`, `Scheduler.pickNext` + `Scheduler.holdForBudget` + `nextEligibleItem()` (Task 3), `runRelist(itemId, mode, hooks)`, `readBlock()`, `relistLog()`, `countWithin()`, `LAST_PROFILE_KEY`.
+- Produces: engine behavior — on `wake` or page load with a `running` schedule: claim/renew the lease (`vintimated:schedule.lease` via `Scheduler.renewLease`), `Scheduler.decide(...)`, and on `'fire'`: hold-and-skip check (`Scheduler.holdForBudget` over the shared log — never a dialog) → pick one item via `nextEligibleItem()` → `runRelist(id, 'publish', { label, busy: () => {}, card: () => engineCard(id), reload: false, budgetPreapproved: true })` → `Scheduler.transition(state, { type: 'fire', now, id, gapMs: Scheduler.nextGapMs(defn, Math.random) })` → persist. Exactly one firing per wake.
+- Produces: engine tab lifecycle — `start` opens `LAST_PROFILE_KEY`'s wardrobe if no wardrobe tab exists (or adopts one); the tab closes when the state leaves `running` (stop/abort/period end) or the extension is switched off.
+
+- [ ] **Step 1: Implement the loop** — `wake` handler as described; **one firing per wake** (the no-backfill property); a second wake during an in-flight `runRelist` finds the lease held and does nothing. Engine tab is pinned to the wardrobe (if the seller navigates it away, the next wake re-navigates it to the remembered profile).
+- [ ] **Step 2: Verify**
+  Run: `npm test` and `node build.mjs`
+  Expected: PASS; both zips contain `scheduler.js`; `manifest.json` in the zips lists `alarms`.
+- [ ] **Step 3: Commit**
+  ```bash
+  git add content.js background.js
+  git commit -m "Schedule engine: lease-claimed firing loop on wake"
   ```
 
 ---
