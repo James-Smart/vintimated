@@ -68,7 +68,7 @@ All settings live in the extension popup.
 | Setting | Storage key | What it does | Default |
 | --- | --- | --- | --- |
 | Vintimated on/off | `vintimated:enabled` | Master switch. Off removes Vintimated's buttons and bulk bar and it acts on nothing. | On |
-| Wait 10 seconds between relists | `vintimated:hardCooldown` | Hard cooldown from the end of one relist to the start of the next. Off sends them back to back — the pattern Vinted blocks accounts for. | On |
+| Wait 10 seconds between relists | `vintimated:hardCooldown` | A hard 10 s cooldown measured from the moment the old listing is removed to the start of the next relist. Off sends them back to back — the pattern Vinted blocks accounts for. | On |
 | Pause 0.9 to 2.4 s between requests | `vintimated:pace` | Random breathing room between the individual requests of a relist (`safe`). Off switches to `fast`: 0.25–0.7 s, fast enough to read as an automated script. | On (`safe`) |
 | Refresh the photos on upload | `vintimated:photoRefresh` | What a relist hands Vinted for photos: `off` — bytes unchanged, the same photo twice, which is what a duplicate listing looks like; `stealth` — the invisible transforms described above; `bordered` — the same invisible changes plus the thin white frame. | `bordered` |
 | Reload the page | `vintimated:reloadAfterRelist` | Reload after a relist so the copy shows up immediately (and once at the end of a bulk run). Off keeps your place on the page. | On |
