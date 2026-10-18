@@ -1,5 +1,6 @@
 // Bumpline — packages the extension for both stores.
 // Copyright (C) 2026 g1ampy
+// Modifications Copyright (C) 2026 Vintimated contributors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -67,7 +68,7 @@ const ICONS = [
 
 // Firefox refuses an add-on whose id it cannot pin down, and without one every
 // update looks like a fresh install with an empty storage.local.
-const GECKO_ID = 'giampy@privacyrequired.com';
+const GECKO_ID = 'vintimated@users.noreply.github.com';
 
 // Manifest v3 landed in Firefox 109, but the data-collection notice below only
 // became a manifest key in 140 — which is also the current ESR, so nothing is
@@ -211,7 +212,7 @@ function collect(source, name, into) {
 
 function build(target, manifest) {
   const version = manifest.version;
-  const stem = `bumpline-${version}-${target}`;
+  const stem = `vintimated-${version}-${target}`;
   const folder = join(OUT, stem);
 
   const entries = [
@@ -245,7 +246,7 @@ function checkCatalogues() {
   const source = readFileSync(join(ROOT, 'strings.js'), 'utf8');
   const { CATALOG } = new Function(
     'navigator', 'document',
-    source + '; return BumplineText;',
+    source + '; return VintimatedText;',
   )({ language: 'en' }, { querySelectorAll: () => [], documentElement: {} });
 
   // The language every other one is a translation of, and the one strings.js

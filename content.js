@@ -1,5 +1,6 @@
 // Bumpline — relist your Vinted items in one click.
 // Copyright (C) 2026 g1ampy
+// Modifications Copyright (C) 2026 Vintimated contributors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -25,7 +26,7 @@
   // The words, in the seller's language. One letter because this file says it
   // on nearly every line that puts something on screen, and a count written
   // here would be wrong again by the next commit.
-  const T = (key, ...subs) => BumplineText.t(key, ...subs);
+  const T = (key, ...subs) => VintimatedText.t(key, ...subs);
 
   // A refusal as it is read rather than as it was thrown.
   //
@@ -66,20 +67,20 @@
   const SELECTOR = {
     card: '[data-testid^="product-item-id-"]',
     bump: 'button[data-testid="bump-button"]',
-    ourButton: '.bumpline-btn',
+    ourButton: '.vintimated-btn',
     // Every item gets two buttons, so counting ourButton counts items twice.
-    ourItem: '.bumpline-btn:not(.bumpline-btn--draft)',
-    gap: '.bumpline-gap',
+    ourItem: '.vintimated-btn:not(.vintimated-btn--draft)',
+    gap: '.vintimated-gap',
   };
 
   const CLASS = {
-    button: 'bumpline-btn',
-    draftButton: 'bumpline-btn--draft',
-    lockedButton: 'bumpline-btn--locked',
-    gap: 'bumpline-gap',
-    toast: 'bumpline-toast',
-    banner: 'bumpline-banner',
-    ageLine: 'bumpline-age',
+    button: 'vintimated-btn',
+    draftButton: 'vintimated-btn--draft',
+    lockedButton: 'vintimated-btn--locked',
+    gap: 'vintimated-gap',
+    toast: 'vintimated-toast',
+    banner: 'vintimated-banner',
+    ageLine: 'vintimated-age',
   };
 
   // Two attempts, not five. Vinted rate-limits without saying so, and a refusal
@@ -91,18 +92,18 @@
   // this device, retried on the next page load rather than in a tight loop.
   const PUBLISH_ATTEMPTS = 2;
 
-  const STORE_PREFIX = 'bumpline:pending:';
-  const LAST_PROFILE_KEY = 'bumpline:lastProfile';
-  const RELOAD_KEY = 'bumpline:reloadAfterRelist';
-  const PACE_KEY = 'bumpline:pace';
-  const HARD_COOLDOWN_KEY = 'bumpline:hardCooldown';
-  const LOCAL_DRAFTS_KEY = 'bumpline:localDrafts';
-  const RELIST_LOG_KEY = 'bumpline:relistLog';
-  const BLOCK_KEY = 'bumpline:blockedUntil';
-  const REFUSAL_LOG_KEY = 'bumpline:refusalLog';
-  const ENABLED_KEY = 'bumpline:enabled';
-  const LANG_KEY = 'bumpline:lang';
-  const DB_NAME = 'bumpline';
+  const STORE_PREFIX = 'vintimated:pending:';
+  const LAST_PROFILE_KEY = 'vintimated:lastProfile';
+  const RELOAD_KEY = 'vintimated:reloadAfterRelist';
+  const PACE_KEY = 'vintimated:pace';
+  const HARD_COOLDOWN_KEY = 'vintimated:hardCooldown';
+  const LOCAL_DRAFTS_KEY = 'vintimated:localDrafts';
+  const RELIST_LOG_KEY = 'vintimated:relistLog';
+  const BLOCK_KEY = 'vintimated:blockedUntil';
+  const REFUSAL_LOG_KEY = 'vintimated:refusalLog';
+  const ENABLED_KEY = 'vintimated:enabled';
+  const LANG_KEY = 'vintimated:lang';
+  const DB_NAME = 'vintimated';
   const DB_STORE = 'photos';
 
   // A relist is not one request. It is a read, one upload per photo, a draft, a
@@ -142,7 +143,7 @@
   const BLOCK_BASE_MS = { 429: 15 * 60 * 1000, 403: 30 * 60 * 1000 };
   const BLOCK_CAP_MS = 6 * 60 * 60 * 1000;
 
-  const trace = (...parts) => console.debug('[Bumpline]', ...parts);
+  const trace = (...parts) => console.debug('[Vintimated]', ...parts);
   const pause = ms => new Promise(done => setTimeout(done, ms));
 
   const randomUuid = () =>
@@ -596,9 +597,9 @@
   // catalogues can never produce the same string and the same catalogue always
   // produces the same one.
   function applyLanguage(lang) {
-    const before = BumplineText.locale();
-    BumplineText.use(lang);
-    if (BumplineText.locale() === before) return;
+    const before = VintimatedText.locale();
+    VintimatedText.use(lang);
+    if (VintimatedText.locale() === before) return;
     removeOurUi();
     // Puts the buttons back, and paintAgeLabels puts the age lines back with
     // them — worded from ageDays, so they come back in the new language rather
@@ -633,7 +634,7 @@
   let unlockTimer = null;
 
   const clockOf = at =>
-    new Date(at).toLocaleTimeString(BumplineText.locale(), { hour: '2-digit', minute: '2-digit' });
+    new Date(at).toLocaleTimeString(VintimatedText.locale(), { hour: '2-digit', minute: '2-digit' });
 
   // The one place lockedUntil changes. Also arms the timer that lifts the pause
   // without the page having to be reloaded.
@@ -711,7 +712,7 @@
       });
   }
 
-  const workerTokens = () => askWorker({ type: 'bumpline:tokens' });
+  const workerTokens = () => askWorker({ type: 'vintimated:tokens' });
 
   async function anonymousId() {
     const fromCookie = readCookie('anon_id');
@@ -1010,7 +1011,7 @@
       // fall through to the worker
     }
 
-    const relayed = await askWorker({ type: 'bumpline:fetchBinary', url });
+    const relayed = await askWorker({ type: 'vintimated:fetchBinary', url });
     if (!relayed || !relayed.ok || !relayed.buffer) {
       const why = (relayed && (relayed.status || relayed.error)) || 'no response';
       throw new Error(`Could not download a photo (${why})`);
@@ -1022,7 +1023,7 @@
   // Styling and page furniture
   // ===========================================================================
 
-  const STYLE_ID = 'bumpline-style';
+  const STYLE_ID = 'vintimated-style';
 
   function installStyles() {
     if (document.getElementById(STYLE_ID)) return;
@@ -1046,7 +1047,7 @@
          a stuck relist — are one card in three places. Their colours are fixed
          rather than following the page: a card with its own background reads on
          a light Vinted and on a dark one. */
-      .bumpline-card {
+      .vintimated-card {
         /* The toolbar popup's own tokens, value for value — shadcn preset
            b1tepwVzU, style base-luma, on the logo's hue — so the two halves of
            the extension are one thing. They are declared on the card rather
@@ -1075,13 +1076,13 @@
                     0 0 0 1px var(--bl-ring);
         font: 14px/1.4285 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
               Helvetica, Arial, sans-serif;
-        animation: bumpline-card-in 180ms cubic-bezier(.16,1,.3,1);
+        animation: vintimated-card-in 180ms cubic-bezier(.16,1,.3,1);
       }
 
       /* Vinted follows the system theme and so does the popup, so this does
          too rather than sitting on the page as a white slab. */
       @media (prefers-color-scheme: dark) {
-        .bumpline-card {
+        .vintimated-card {
           --bl-card: oklch(0.225 0.018 215);
           --bl-ink: oklch(0.97 0.007 203);
           --bl-muted-ink: oklch(0.72 0.026 210);
@@ -1090,10 +1091,10 @@
           --bl-ring: oklch(1 0 0 / 10%);
         }
       }
-      .bumpline-card[data-leaving] {
-        animation: bumpline-card-out 180ms ease forwards;
+      .vintimated-card[data-leaving] {
+        animation: vintimated-card-out 180ms ease forwards;
       }
-      .bumpline-card__icon {
+      .vintimated-card__icon {
         flex: none;
         width: 16px;
         height: 16px;
@@ -1104,38 +1105,38 @@
         stroke-linecap: round;
         stroke-linejoin: round;
       }
-      .bumpline-card__body { min-width: 0; }
-      .bumpline-card--ok  .bumpline-card__icon { color: var(--bl-success); }
-      .bumpline-card--bad .bumpline-card__icon { color: var(--bl-destructive); }
+      .vintimated-card__body { min-width: 0; }
+      .vintimated-card--ok  .vintimated-card__icon { color: var(--bl-success); }
+      .vintimated-card--bad .vintimated-card__icon { color: var(--bl-destructive); }
 
-      @keyframes bumpline-card-in {
+      @keyframes vintimated-card-in {
         from { opacity: 0; transform: translateY(8px) scale(.98); }
       }
-      @keyframes bumpline-card-out {
+      @keyframes vintimated-card-out {
         to { opacity: 0; transform: translateY(4px); }
       }
       @media (prefers-reduced-motion: reduce) {
-        .bumpline-card { animation: none; }
-        .bumpline-card[data-leaving] { opacity: 0; animation: none; }
+        .vintimated-card { animation: none; }
+        .vintimated-card[data-leaving] { opacity: 0; animation: none; }
       }
 
       /* Two corners, so neither can cover the other. */
       .${CLASS.toast}  { right: 16px; bottom: 16px; font-weight: 500; }
       .${CLASS.banner} { right: 16px; top: 16px; max-width: 340px; }
-      .bumpline-card__why {
+      .vintimated-card__why {
         margin-top: 8px;
         font-size: 13px;
         overflow-wrap: anywhere;
         color: var(--bl-muted-ink);
       }
-      .bumpline-banner__actions {
+      .vintimated-banner__actions {
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
         margin-top: 10px;
       }
 
-      .bumpline-modal {
+      .vintimated-modal {
         position: fixed;
         inset: 0;
         z-index: 2147483647;
@@ -1144,7 +1145,7 @@
         justify-content: center;
         background: rgba(0,0,0,.45);
       }
-      .bumpline-modal__panel {
+      .vintimated-modal__panel {
         width: min(420px, 90vw);
         padding: 20px;
         border-radius: 10px;
@@ -1154,9 +1155,9 @@
         line-height: 1.4;
         box-shadow: 0 8px 32px rgba(0,0,0,.3);
       }
-      .bumpline-modal__title { margin-bottom: 8px; font-size: 16px; font-weight: 700; }
-      .bumpline-modal__body { margin-bottom: 14px; }
-      .bumpline-modal__picker {
+      .vintimated-modal__title { margin-bottom: 8px; font-size: 16px; font-weight: 700; }
+      .vintimated-modal__body { margin-bottom: 14px; }
+      .vintimated-modal__picker {
         width: 100%;
         padding: 8px;
         border: 1px solid #ccc;
@@ -1165,7 +1166,7 @@
         color: #111;
         font-size: 14px;
       }
-      .bumpline-modal__actions {
+      .vintimated-modal__actions {
         display: flex;
         justify-content: flex-end;
         gap: 8px;
@@ -1200,7 +1201,7 @@
     else button.textContent = label;
   }
 
-  const TOAST_ID = 'bumpline-toast';
+  const TOAST_ID = 'vintimated-toast';
 
   // Lucide check, triangle-alert and circle-pause. The tone is in the glyph as
   // well as in the colour, so a card survives a greyscale screen.
@@ -1218,13 +1219,13 @@
   // Empties a card, gives it its icon, and hands back the body to fill. One
   // builder, so the three cards cannot drift apart.
   function paintCard(node, place, tone, glyph) {
-    node.className = `bumpline-card bumpline-card--${tone} ${place}`;
+    node.className = `vintimated-card vintimated-card--${tone} ${place}`;
     node.textContent = '';
 
     const icon = document.createElementNS(SVG_NS, 'svg');
     icon.setAttribute('viewBox', '0 0 24 24');
     icon.setAttribute('aria-hidden', 'true');
-    icon.setAttribute('class', 'bumpline-card__icon');
+    icon.setAttribute('class', 'vintimated-card__icon');
     for (const d of glyph) {
       const path = document.createElementNS(SVG_NS, 'path');
       path.setAttribute('d', d);
@@ -1232,7 +1233,7 @@
     }
 
     const body = document.createElement('div');
-    body.className = 'bumpline-card__body';
+    body.className = 'vintimated-card__body';
     node.append(icon, body);
     return body;
   }
@@ -1590,7 +1591,7 @@
   // Recovery UI
   // ===========================================================================
 
-  const bannerId = itemId => `bumpline-banner-${itemId}`;
+  const bannerId = itemId => `vintimated-banner-${itemId}`;
 
   function showBanner(itemId, record) {
     let box = document.getElementById(bannerId(itemId));
@@ -1613,13 +1614,13 @@
     // happened to: they could see that it failed, never why.
     if (record.lastError) {
       const reason = document.createElement('div');
-      reason.className = 'bumpline-card__why';
+      reason.className = 'vintimated-card__why';
       reason.textContent = T('card.recovery.reason', sayReason(record.lastError));
       body.appendChild(reason);
     }
 
     const actions = document.createElement('div');
-    actions.className = 'bumpline-banner__actions';
+    actions.className = 'vintimated-banner__actions';
 
     const retry = buildButton(T('card.recovery.retry'));
     retry.addEventListener('click', async event => {
@@ -1662,7 +1663,7 @@
       const href = URL.createObjectURL(file);
       const link = document.createElement('a');
       link.href = href;
-      link.download = `bumpline-item-${itemId}.json`;
+      link.download = `vintimated-item-${itemId}.json`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1864,7 +1865,7 @@
       }
       return newId;
     } catch (err) {
-      console.error('[Bumpline] relist still pending for item', itemId, err);
+      console.error('[Vintimated] relist still pending for item', itemId, err);
       record.attempts = (record.attempts || 0) + 1;
       // This is written to storage.local and read back on a later page load, so
       // what goes in is the code and its arguments rather than the finished
@@ -1991,21 +1992,21 @@
   function askToContinue({ title, body, proceed, cancel }) {
     return new Promise(resolve => {
       const overlay = document.createElement('div');
-      overlay.className = 'bumpline-modal';
+      overlay.className = 'vintimated-modal';
 
       const panel = document.createElement('div');
-      panel.className = 'bumpline-modal__panel';
+      panel.className = 'vintimated-modal__panel';
 
       const heading = document.createElement('div');
-      heading.className = 'bumpline-modal__title';
+      heading.className = 'vintimated-modal__title';
       heading.textContent = title;
 
       const text = document.createElement('div');
-      text.className = 'bumpline-modal__body';
+      text.className = 'vintimated-modal__body';
       text.textContent = body;
 
       const actions = document.createElement('div');
-      actions.className = 'bumpline-modal__actions';
+      actions.className = 'vintimated-modal__actions';
 
       const stop = buildButton(cancel);
       stop.addEventListener('click', event => {
@@ -2039,21 +2040,21 @@
   function askForSize(groups, title, why, bodyKey) {
     return new Promise(resolve => {
       const overlay = document.createElement('div');
-      overlay.className = 'bumpline-modal';
+      overlay.className = 'vintimated-modal';
 
       const panel = document.createElement('div');
-      panel.className = 'bumpline-modal__panel';
+      panel.className = 'vintimated-modal__panel';
 
       const heading = document.createElement('div');
-      heading.className = 'bumpline-modal__title';
+      heading.className = 'vintimated-modal__title';
       heading.textContent = T('size.title');
 
       const body = document.createElement('div');
-      body.className = 'bumpline-modal__body';
+      body.className = 'vintimated-modal__body';
       body.textContent = T(bodyKey || 'size.body', title, why);
 
       const picker = document.createElement('select');
-      picker.className = 'bumpline-modal__picker';
+      picker.className = 'vintimated-modal__picker';
       const blank = document.createElement('option');
       blank.value = '';
       blank.textContent = T('size.blank');
@@ -2072,7 +2073,7 @@
       }
 
       const actions = document.createElement('div');
-      actions.className = 'bumpline-modal__actions';
+      actions.className = 'vintimated-modal__actions';
 
       const cancel = buildButton(T('size.cancel'));
       cancel.addEventListener('click', event => {
@@ -2476,7 +2477,7 @@
       // On failure advancePending has already stored the record and raised the
       // banner, and the next page load will try again.
     } catch (err) {
-      console.error('[Bumpline]', err);
+      console.error('[Vintimated]', err);
       toast(T('toast.relistStopped', (err && err.message) || err), 'bad');
     } finally {
       button.disabled = false;
@@ -2549,7 +2550,7 @@
   // so the popup cannot tell them apart and must not try. It asks the page
   // instead, and the page answers with what it actually put on screen.
   ext.runtime.onMessage.addListener((message, _sender, respond) => {
-    if (!message || message.type !== 'bumpline:pageState') return false;
+    if (!message || message.type !== 'vintimated:pageState') return false;
     respond({
       profileUrl: `${SITE}${location.pathname}`,
       relistable: document.querySelectorAll(SELECTOR.ourItem).length,

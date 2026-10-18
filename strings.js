@@ -1,5 +1,6 @@
 // Bumpline — the words, in every language the extension speaks.
 // Copyright (C) 2026 g1ampy
+// Modifications Copyright (C) 2026 Vintimated contributors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -25,7 +26,7 @@
 // the page's own, the same way store.js is, which is all an extension page or a
 // content script needs.
 
-const BumplineText = (() => {
+const VintimatedText = (() => {
   const CATALOG = {
     en: {
       'button.relist': 'Relist',
@@ -147,8 +148,8 @@ const BumplineText = (() => {
       // decoration.
       // Colour needs no tooltip beyond the product name, which is the same word
       // in every language and is therefore not a key.
-      'popup.tooltip.off': 'Bumpline: off',
-      'popup.tooltip.notVinted': 'Bumpline: not a Vinted page',
+      'popup.tooltip.off': 'Vintimated: off',
+      'popup.tooltip.notVinted': 'Vintimated: not a Vinted page',
 
       // The switch at the top, and the word beside it that says the same
       // thing the knob position already shows.
@@ -156,11 +157,11 @@ const BumplineText = (() => {
       'popup.power.off': 'Off',
       // The switch's own name, read out to a screen reader rather than
       // shown; a product name, so it stays the same word in every language.
-      'popup.power.label': 'Bumpline',
+      'popup.power.label': 'Vintimated',
 
       // Shown in place of the whole panel while the switch is off: no card
       // below has anything to report on work that is not happening.
-      'popup.offline.title': 'Bumpline is switched off',
+      'popup.offline.title': 'Vintimated is switched off',
       'popup.offline.hint': 'Turn it back on to relist your items.',
 
       // The status card: what this tab is, before the pending and paused
@@ -264,8 +265,8 @@ const BumplineText = (() => {
       'popup.pending.title': '{0} relists have not finished',
       'popup.pending.itemFallback': 'Item {0}',
       'popup.pending.more': 'and {0} more',
-      'popup.pending.note.enabled': 'Bumpline retries these each time you open a Vinted profile page. {0}',
-      'popup.pending.note.disabled': 'Bumpline is off, so nothing is being retried. {0}',
+      'popup.pending.note.enabled': 'Vintimated retries these each time you open a Vinted profile page. {0}',
+      'popup.pending.note.disabled': 'Vintimated is off, so nothing is being retried. {0}',
       'popup.pending.note.draft': 'The copy is also in your Vinted drafts.',
       'popup.pending.note.device': 'The copy is saved on this device.',
 
@@ -273,7 +274,7 @@ const BumplineText = (() => {
       // that only appears once store.js has worked out where it goes.
       'footer.howItWorks': 'How it works',
       'footer.reportProblem': 'Report a problem',
-      'footer.rate': 'Rate Bumpline',
+      'footer.rate': 'Rate Vintimated',
     },
     it: {
       'button.relist': 'Ripubblica',
@@ -356,14 +357,14 @@ const BumplineText = (() => {
       'pause.why.botCheck': 'Vinted ha risposto con una verifica anti-bot.',
       'pause.why.restricted': 'Vinted ha limitato questo account, impedendogli di pubblicare o modificare articoli.',
 
-      'popup.tooltip.off': 'Bumpline: spento',
-      'popup.tooltip.notVinted': 'Bumpline: questa non è una pagina Vinted',
+      'popup.tooltip.off': 'Vintimated: spento',
+      'popup.tooltip.notVinted': 'Vintimated: questa non è una pagina Vinted',
 
       'popup.power.on': 'Attivo',
       'popup.power.off': 'Spento',
-      'popup.power.label': 'Bumpline',
+      'popup.power.label': 'Vintimated',
 
-      'popup.offline.title': 'Bumpline è spento',
+      'popup.offline.title': 'Vintimated è spento',
       'popup.offline.hint': 'Riattivalo per ripubblicare i tuoi articoli.',
 
       'popup.status.checking.title': 'Controllo di questa scheda',
@@ -435,14 +436,14 @@ const BumplineText = (() => {
       'popup.pending.title': '{0} ripubblicazioni non sono state completate',
       'popup.pending.itemFallback': 'Articolo {0}',
       'popup.pending.more': 'e altri {0}',
-      'popup.pending.note.enabled': 'Bumpline li ritenta ogni volta che apri una pagina del profilo Vinted. {0}',
-      'popup.pending.note.disabled': 'Bumpline è spento, quindi non viene ritentato nulla. {0}',
+      'popup.pending.note.enabled': 'Vintimated li ritenta ogni volta che apri una pagina del profilo Vinted. {0}',
+      'popup.pending.note.disabled': 'Vintimated è spento, quindi non viene ritentato nulla. {0}',
       'popup.pending.note.draft': 'La copia si trova anche nelle tue bozze di Vinted.',
       'popup.pending.note.device': 'La copia è salvata su questo dispositivo.',
 
       'footer.howItWorks': 'Come funziona',
       'footer.reportProblem': 'Segnala un problema',
-      'footer.rate': 'Vota Bumpline',
+      'footer.rate': 'Vota Vintimated',
     },
     fr: {
       'button.relist': 'Republier',
@@ -525,14 +526,14 @@ const BumplineText = (() => {
       'pause.why.botCheck': 'Vinted a répondu par un contrôle anti-robot.',
       'pause.why.restricted': 'Vinted a restreint ce compte : il ne peut plus publier ni modifier d\'articles.',
 
-      'popup.tooltip.off': 'Bumpline : désactivé',
-      'popup.tooltip.notVinted': 'Bumpline : ce n\'est pas une page Vinted',
+      'popup.tooltip.off': 'Vintimated : désactivé',
+      'popup.tooltip.notVinted': 'Vintimated : ce n\'est pas une page Vinted',
 
       'popup.power.on': 'Activé',
       'popup.power.off': 'Désactivé',
-      'popup.power.label': 'Bumpline',
+      'popup.power.label': 'Vintimated',
 
-      'popup.offline.title': 'Bumpline est désactivé',
+      'popup.offline.title': 'Vintimated est désactivé',
       'popup.offline.hint': 'Réactive-le pour republier tes articles.',
 
       'popup.status.checking.title': 'Vérification de cet onglet',
@@ -604,14 +605,14 @@ const BumplineText = (() => {
       'popup.pending.title': '{0} republications n\'ont pas abouti',
       'popup.pending.itemFallback': 'Article {0}',
       'popup.pending.more': 'et {0} de plus',
-      'popup.pending.note.enabled': 'Bumpline les retente chaque fois que tu ouvres une page de profil Vinted. {0}',
-      'popup.pending.note.disabled': 'Bumpline est désactivé, donc rien n\'est retenté. {0}',
+      'popup.pending.note.enabled': 'Vintimated les retente chaque fois que tu ouvres une page de profil Vinted. {0}',
+      'popup.pending.note.disabled': 'Vintimated est désactivé, donc rien n\'est retenté. {0}',
       'popup.pending.note.draft': 'La copie se trouve aussi dans tes brouillons Vinted.',
       'popup.pending.note.device': 'La copie est enregistrée sur cet appareil.',
 
       'footer.howItWorks': 'Comment ça marche',
       'footer.reportProblem': 'Signaler un problème',
-      'footer.rate': 'Noter Bumpline',
+      'footer.rate': 'Noter Vintimated',
     },
   };
 

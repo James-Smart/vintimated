@@ -1,5 +1,6 @@
 // Bumpline — where this copy came from, and where a rating would go.
 // Copyright (C) 2026 g1ampy
+// Modifications Copyright (C) 2026 Vintimated contributors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -23,7 +24,7 @@
 // page needs: no modules, no bundler, and a top-level const is reachable from
 // every script that follows it.
 
-const BumplineStore = (() => {
+const VintimatedStore = (() => {
   // Firefox answers to `browser` and Chrome to `chrome`; only the namespace is
   // in question here, not the promises, so either will do.
   const ext = globalThis.browser ?? globalThis.chrome;

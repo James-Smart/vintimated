@@ -1,6 +1,7 @@
 // Bumpline — main-world fetch bridge.
 //
 // Copyright (C) 2026 g1ampy
+// Modifications Copyright (C) 2026 Vintimated contributors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free

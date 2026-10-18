@@ -1,4 +1,5 @@
 // Bumpline — toolbar popup.
+// Modifications Copyright (C) 2026 Vintimated contributors.
 //
 // Installed from the store the extension is otherwise invisible: it works only
 // inside a Vinted profile page, so a new user sees nothing anywhere and assumes
@@ -12,16 +13,16 @@
 // once for both.
 const ext = globalThis.browser ?? globalThis.chrome;
 
-const STORE_PREFIX = 'bumpline:pending:';
-const LAST_PROFILE_KEY = 'bumpline:lastProfile';
-const RELOAD_KEY = 'bumpline:reloadAfterRelist';
-const PACE_KEY = 'bumpline:pace';
-const LANG_KEY = 'bumpline:lang';
-const HARD_COOLDOWN_KEY = 'bumpline:hardCooldown';
-const LOCAL_DRAFTS_KEY = 'bumpline:localDrafts';
-const RELIST_LOG_KEY = 'bumpline:relistLog';
-const BLOCK_KEY = 'bumpline:blockedUntil';
-const ENABLED_KEY = 'bumpline:enabled';
+const STORE_PREFIX = 'vintimated:pending:';
+const LAST_PROFILE_KEY = 'vintimated:lastProfile';
+const RELOAD_KEY = 'vintimated:reloadAfterRelist';
+const PACE_KEY = 'vintimated:pace';
+const LANG_KEY = 'vintimated:lang';
+const HARD_COOLDOWN_KEY = 'vintimated:hardCooldown';
+const LOCAL_DRAFTS_KEY = 'vintimated:localDrafts';
+const RELIST_LOG_KEY = 'vintimated:relistLog';
+const BLOCK_KEY = 'vintimated:blockedUntil';
+const ENABLED_KEY = 'vintimated:enabled';
 
 // These have to agree with content.js, which is the side that enforces them.
 // The popup only reports, sets, and — for the pause — lifts.
@@ -39,7 +40,7 @@ const VINTED_HOST = /(^|\.)vinted\.[a-z]{2,3}(\.[a-z]{2})?$/i;
 // from the catalogue rather than written out here, so adding a language is
 // strings.js and _locales and nothing else — a list kept by hand is a list that
 // disagrees with the catalogue the first time somebody forgets it.
-const LANGS = ['auto', ...Object.keys(BumplineText.CATALOG)];
+const LANGS = ['auto', ...Object.keys(VintimatedText.CATALOG)];
 
 // Lucide paths. Stroke, width and colour come from the .icon rule, so the two
 // glyphs stay the same weight as each other.
@@ -81,7 +82,7 @@ const onVinted = url => !!url && VINTED_HOST.test(url.hostname);
 // when it opens the tab, and a real href can be middle-clicked and copied.
 function wireReview() {
   const link = document.getElementById('review');
-  const url = BumplineStore.reviewUrl();
+  const url = VintimatedStore.reviewUrl();
   // Nowhere to send anyone is said by not asking, rather than by asking and
   // landing them on a 404.
   link.hidden = !url;
@@ -95,7 +96,7 @@ function wireReview() {
 async function askPage(tab) {
   if (!tab || tab.id == null) return null;
   try {
-    return await ext.tabs.sendMessage(tab.id, { type: 'bumpline:pageState' });
+    return await ext.tabs.sendMessage(tab.id, { type: 'vintimated:pageState' });
   } catch (_) {
     return null;
   }
@@ -107,8 +108,8 @@ function describePage(page, url) {
       return {
         tone: 'ok',
         glyph: GLYPH.ready,
-        title: BumplineText.t('popup.status.ready.title'),
-        detail: BumplineText.t(
+        title: VintimatedText.t('popup.status.ready.title'),
+        detail: VintimatedText.t(
           page.relistable === 1 ? 'popup.status.ready.detail.one' : 'popup.status.ready.detail',
           page.relistable,
         ),
@@ -117,23 +118,23 @@ function describePage(page, url) {
     return {
       tone: 'plain',
       glyph: GLYPH.elsewhere,
-      title: BumplineText.t('popup.status.empty.title'),
-      detail: BumplineText.t('popup.status.empty.detail'),
+      title: VintimatedText.t('popup.status.empty.title'),
+      detail: VintimatedText.t('popup.status.empty.detail'),
     };
   }
   if (onVinted(url)) {
     return {
       tone: 'plain',
       glyph: GLYPH.elsewhere,
-      title: BumplineText.t('popup.status.notProfile.title'),
-      detail: BumplineText.t('popup.status.notProfile.detail'),
+      title: VintimatedText.t('popup.status.notProfile.title'),
+      detail: VintimatedText.t('popup.status.notProfile.detail'),
     };
   }
   return {
     tone: 'plain',
     glyph: GLYPH.elsewhere,
-    title: BumplineText.t('popup.status.notVinted.title'),
-    detail: BumplineText.t('popup.status.notVinted.detail'),
+    title: VintimatedText.t('popup.status.notVinted.title'),
+    detail: VintimatedText.t('popup.status.notVinted.detail'),
   };
 }
 
@@ -212,10 +213,10 @@ const countWithin = (log, window) => {
 // written one way here and another way on the Vinted page. content.js formats
 // its clock from the same source for the same reason.
 const clockOf = at =>
-  new Date(at).toLocaleTimeString(BumplineText.locale(), { hour: '2-digit', minute: '2-digit' });
+  new Date(at).toLocaleTimeString(VintimatedText.locale(), { hour: '2-digit', minute: '2-digit' });
 
 const dayOf = at =>
-  new Date(at).toLocaleDateString(BumplineText.locale(), { day: '2-digit', month: '2-digit' });
+  new Date(at).toLocaleDateString(VintimatedText.locale(), { day: '2-digit', month: '2-digit' });
 
 // A refusal is measured in hours, a restriction in days, and "until 23:59"
 // with no date is a lie about the second kind.
@@ -230,7 +231,7 @@ const whenOf = at => {
   }
   return {
     key: 'popup.paused.detail.dated',
-    text: BumplineText.t('popup.paused.until.dated', dayOf(at), clockOf(at)),
+    text: VintimatedText.t('popup.paused.until.dated', dayOf(at), clockOf(at)),
   };
 };
 
@@ -247,7 +248,7 @@ const WHY_KEYS = {
 // A record written before this version carries a finished English sentence
 // instead of a code, and it can still be sitting in storage.local with hours
 // left on it — read it unchanged rather than mistranslate or blank it out.
-const whyOf = why => (WHY_KEYS[why] ? BumplineText.t(WHY_KEYS[why]) : why);
+const whyOf = why => (WHY_KEYS[why] ? VintimatedText.t(WHY_KEYS[why]) : why);
 
 // The same rule, applied to why a relist failed rather than to why a pause is
 // standing. content.js writes record.lastError as { code, args } when the
@@ -259,7 +260,7 @@ function sayReason(reason) {
   if (!reason || typeof reason !== 'object' || !reason.code) return String(reason);
   // A refusal of Vinted's quoted inside a sentence of ours arrives as an
   // argument, so the arguments are resolved the same way before substitution.
-  return BumplineText.t(reason.code, ...(reason.args || []).map(sayReason));
+  return VintimatedText.t(reason.code, ...(reason.args || []).map(sayReason));
 }
 
 // A pause that has already run out is no pause at all.
@@ -314,7 +315,7 @@ async function readStored() {
 
 const nameOf = record =>
   (record.snapshot && record.snapshot.title) ||
-  BumplineText.t('popup.pending.itemFallback', record.itemId || '?');
+  VintimatedText.t('popup.pending.itemFallback', record.itemId || '?');
 
 // Records written before 1.0.0 carry no profileUrl; the country domain is the
 // best guess left, and it at least lands on the right site.
@@ -329,8 +330,8 @@ function renderPending(records, enabled) {
 
   document.getElementById('pending-title').textContent =
     records.length === 1
-      ? BumplineText.t('popup.pending.title.one')
-      : BumplineText.t('popup.pending.title', records.length);
+      ? VintimatedText.t('popup.pending.title.one')
+      : VintimatedText.t('popup.pending.title', records.length);
 
   // A long list would push the answer off screen; four names are enough to
   // recognise what is stuck.
@@ -351,7 +352,7 @@ function renderPending(records, enabled) {
   }
   if (records.length > 4) {
     const rest = document.createElement('li');
-    rest.textContent = BumplineText.t('popup.pending.more', records.length - 4);
+    rest.textContent = VintimatedText.t('popup.pending.more', records.length - 4);
     list.appendChild(rest);
   }
 
@@ -362,9 +363,9 @@ function renderPending(records, enabled) {
   // carries the second as its {0} — the same shape content.js uses for
   // toast.reloading.
   const onVintedToo = records.some(record => record.draft && record.draft.id);
-  document.getElementById('pending-note').textContent = BumplineText.t(
+  document.getElementById('pending-note').textContent = VintimatedText.t(
     enabled ? 'popup.pending.note.enabled' : 'popup.pending.note.disabled',
-    BumplineText.t(onVintedToo ? 'popup.pending.note.draft' : 'popup.pending.note.device'),
+    VintimatedText.t(onVintedToo ? 'popup.pending.note.draft' : 'popup.pending.note.device'),
   );
 
   box.hidden = false;
@@ -375,11 +376,11 @@ function renderPending(records, enabled) {
 function chooseAction({ pending, lastProfile }, page, here) {
   const stuck = pending.length ? profileOf(pending[0]) : null;
   if (stuck && stuck !== here) {
-    return { label: BumplineText.t('popup.action.openProfilePage'), url: stuck };
+    return { label: VintimatedText.t('popup.action.openProfilePage'), url: stuck };
   }
   // A wardrobe with buttons on it is already the destination.
   if (!(page && page.relistable > 0) && lastProfile && lastProfile !== here) {
-    return { label: BumplineText.t('popup.action.openProfile'), url: lastProfile };
+    return { label: VintimatedText.t('popup.action.openProfile'), url: lastProfile };
   }
   return null;
 }
@@ -400,8 +401,8 @@ function renderPause(stored) {
   const lift = document.getElementById('paused-lift');
 
   document.getElementById('paused-title').textContent = fromVinted
-    ? BumplineText.t('popup.paused.titleRestricted')
-    : BumplineText.t('popup.paused.title');
+    ? VintimatedText.t('popup.paused.titleRestricted')
+    : VintimatedText.t('popup.paused.title');
 
   // The title already names the restriction, and when it lifts is Vinted's to
   // say, not this extension's to guess at: the message Vinted sent the account
@@ -411,8 +412,8 @@ function renderPause(stored) {
   const detail = document.getElementById('paused-detail');
   const until = whenOf(stored.paused.until);
   detail.textContent = fromVinted
-    ? BumplineText.t('popup.paused.restrictionNote')
-    : BumplineText.t(until.key, whyOf(stored.paused.why), until.text);
+    ? VintimatedText.t('popup.paused.restrictionNote')
+    : VintimatedText.t(until.key, whyOf(stored.paused.why), until.text);
 
   // Folded to two lines, because the title has already said the thing that
   // matters and the rest is where to go looking. The pause the extension sets
@@ -443,7 +444,7 @@ function renderPause(stored) {
     // The chevron turns over on its own; the name is for anyone who cannot see
     // it turn.
     reveal.setAttribute('aria-expanded', String(!folded));
-    reveal.setAttribute('aria-label', BumplineText.t(folded ? 'popup.paused.more' : 'popup.paused.less'));
+    reveal.setAttribute('aria-label', VintimatedText.t(folded ? 'popup.paused.more' : 'popup.paused.less'));
     // max-height rather than height, because that is the property the fold is
     // made of: the animation covers the distance and the class holds the end.
     grow(detail, 'maxHeight', from, folded ? shut : full);
@@ -458,8 +459,8 @@ function renderPause(stored) {
   // Vinted lifted early, and without it the record stood until a date that had
   // stopped meaning anything.
   lift.textContent = fromVinted
-    ? BumplineText.t('popup.paused.liftRestriction')
-    : BumplineText.t('popup.paused.lift');
+    ? VintimatedText.t('popup.paused.liftRestriction')
+    : VintimatedText.t('popup.paused.lift');
   lift.hidden = false;
   card.hidden = false;
 
@@ -469,10 +470,10 @@ function renderPause(stored) {
   lift.onclick = async () => {
     if (!fromVinted) {
       const agreed = await askRisk({
-        title: BumplineText.t('popup.risk.liftPause.title'),
-        detail: BumplineText.t('popup.risk.liftPause.detail'),
-        accept: BumplineText.t('popup.risk.liftPause.accept'),
-        cancel: BumplineText.t('popup.risk.liftPause.cancel'),
+        title: VintimatedText.t('popup.risk.liftPause.title'),
+        detail: VintimatedText.t('popup.risk.liftPause.detail'),
+        accept: VintimatedText.t('popup.risk.liftPause.accept'),
+        cancel: VintimatedText.t('popup.risk.liftPause.cancel'),
       });
       if (!agreed) return;
     }
@@ -515,7 +516,7 @@ function renderVolume({ relists, cooldown }) {
   // Its own sentence, and its own key, embedded as {0} in whichever of the
   // three below it is talking to — the same shape content.js uses for
   // toast.reloading, so two sentences never get glued together as a literal.
-  const wait = owed > 0 ? BumplineText.t('popup.volume.wait', Math.ceil(owed / 1000)) : '';
+  const wait = owed > 0 ? VintimatedText.t('popup.volume.wait', Math.ceil(owed / 1000)) : '';
 
   // Nothing relisted is nothing to say. The two noughts and an empty bar are
   // the whole answer, and a sentence about limits nobody is near was being read
@@ -527,17 +528,17 @@ function renderVolume({ relists, cooldown }) {
 
   if (today >= DAY_ALARM_AT) {
     card.classList.add('card--alert');
-    detail.textContent = BumplineText.t('popup.volume.dayAlarm', wait);
+    detail.textContent = VintimatedText.t('popup.volume.dayAlarm', wait);
     return;
   }
 
   if (thisHour >= HOUR_ALARM_AT) {
     card.classList.add('card--alert');
-    detail.textContent = BumplineText.t('popup.volume.hourAlarm', wait);
+    detail.textContent = VintimatedText.t('popup.volume.hourAlarm', wait);
     return;
   }
 
-  detail.textContent = BumplineText.t('popup.volume.normal', HOUR_ALARM_AT, DAY_ALARM_AT, wait);
+  detail.textContent = VintimatedText.t('popup.volume.normal', HOUR_ALARM_AT, DAY_ALARM_AT, wait);
 }
 
 // --- settings ---------------------------------------------------------------
@@ -687,7 +688,7 @@ function languageName(code) {
 // panel whose script never ran shows only Automatic, which is honest — without
 // the script the row could not have switched anything anyway.
 function fillLanguages(box) {
-  for (const code of Object.keys(BumplineText.CATALOG)) {
+  for (const code of Object.keys(VintimatedText.CATALOG)) {
     const option = document.createElement('option');
     option.value = code;
     option.textContent = languageName(code);
@@ -707,7 +708,7 @@ function wireSettings(stored) {
     // needs to be singular — so one gets its own key rather than sharing the
     // count's placeholder.
     count.textContent = changed
-      ? BumplineText.t(changed === 1 ? 'popup.settings.changed.one' : 'popup.settings.changed', changed)
+      ? VintimatedText.t(changed === 1 ? 'popup.settings.changed.one' : 'popup.settings.changed', changed)
       : '';
   };
   const note = name => value => {
@@ -723,17 +724,17 @@ function wireSettings(stored) {
   wireToggle('local-drafts-toggle', LOCAL_DRAFTS_KEY, stored.localDrafts, note('localDrafts'));
 
   wireGuarded('cooldown-toggle', HARD_COOLDOWN_KEY, stored.cooldown, false, () => ({
-    title: BumplineText.t('popup.risk.cooldown.title'),
-    detail: BumplineText.t('popup.risk.cooldown.detail'),
-    accept: BumplineText.t('popup.risk.cooldown.accept'),
-    cancel: BumplineText.t('popup.risk.cooldown.cancel'),
+    title: VintimatedText.t('popup.risk.cooldown.title'),
+    detail: VintimatedText.t('popup.risk.cooldown.detail'),
+    accept: VintimatedText.t('popup.risk.cooldown.accept'),
+    cancel: VintimatedText.t('popup.risk.cooldown.cancel'),
   }), note('cooldown'));
 
   wireGuarded('pace-toggle', PACE_KEY, stored.paced, false, () => ({
-    title: BumplineText.t('popup.risk.pace.title'),
-    detail: BumplineText.t('popup.risk.pace.detail'),
-    accept: BumplineText.t('popup.risk.pace.accept'),
-    cancel: BumplineText.t('popup.risk.pace.cancel'),
+    title: VintimatedText.t('popup.risk.pace.title'),
+    detail: VintimatedText.t('popup.risk.pace.detail'),
+    accept: VintimatedText.t('popup.risk.pace.accept'),
+    cancel: VintimatedText.t('popup.risk.pace.cancel'),
   }), note('paced'), checked => (checked ? 'safe' : 'fast'));
 
   // The badge is the one thing in the drawer written in the language rather
@@ -767,7 +768,7 @@ function wireLanguage(stored, repaint, paintCount) {
   // so it is the subtag in front that gets drawn.
   const paint = () => {
     const picked = stored.lang !== 'auto';
-    code.textContent = (picked ? stored.lang : BumplineText.locale().split('-')[0]);
+    code.textContent = (picked ? stored.lang : VintimatedText.locale().split('-')[0]);
     box.classList.toggle('lang--picked', picked);
   };
 
@@ -786,8 +787,8 @@ function wireLanguage(stored, repaint, paintCount) {
     }
     stored.lang = wanted;
     // The panel is the one page that does not hear its own storage change.
-    BumplineText.use(wanted);
-    BumplineText.paint();
+    VintimatedText.use(wanted);
+    VintimatedText.paint();
     paint();
     paintCount();
     // BumplineText.paint() has just rewritten every [data-i18n] node straight
@@ -819,7 +820,7 @@ function wirePower(stored, tab, repaint, notePage) {
 
   const paint = () => {
     box.checked = stored.enabled;
-    word.textContent = BumplineText.t(stored.enabled ? 'popup.power.on' : 'popup.power.off');
+    word.textContent = VintimatedText.t(stored.enabled ? 'popup.power.on' : 'popup.power.off');
   };
   paint();
 
@@ -878,8 +879,8 @@ async function main() {
   // The version string is the only thing already on screen, and it is not
   // translatable — everything after this point is, and the markup ships in
   // English, so this is what makes the page Italian.
-  BumplineText.use(stored.lang);
-  BumplineText.paint();
+  VintimatedText.use(stored.lang);
+  VintimatedText.paint();
 
   const here = url ? `${url.origin}${url.pathname}` : null;
 

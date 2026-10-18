@@ -1,5 +1,6 @@
 // Bumpline — relist your Vinted items in one click.
 // Copyright (C) 2026 g1ampy
+// Modifications Copyright (C) 2026 Vintimated contributors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -87,7 +88,7 @@ ext.webRequest.onBeforeSendHeaders.addListener(
     try {
       noteTokens(details.requestHeaders);
     } catch (err) {
-      console.debug('[Bumpline] could not read request headers', err);
+      console.debug('[Vintimated] could not read request headers', err);
     }
   },
   { urls: API_URL_FILTERS },
@@ -121,12 +122,12 @@ async function fetchBinary(url) {
 ext.runtime.onMessage.addListener((message, _sender, respond) => {
   if (!message || !message.type) return false;
 
-  if (message.type === 'bumpline:tokens') {
+  if (message.type === 'vintimated:tokens') {
     tokensForPage().then(respond);
     return true; // the reply is asynchronous
   }
 
-  if (message.type === 'bumpline:fetchBinary' && message.url) {
+  if (message.type === 'vintimated:fetchBinary' && message.url) {
     fetchBinary(message.url).then(respond);
     return true;
   }
@@ -141,8 +142,8 @@ ext.runtime.onMessage.addListener((message, _sender, respond) => {
 // would get you anything. Colour means yes — the switch is on and this tab is a
 // Vinted page. Grey means no, for either reason, and the tooltip says which.
 // Same drawing, luma only.
-const ENABLED_KEY = 'bumpline:enabled';
-const LANG_KEY = 'bumpline:lang';
+const ENABLED_KEY = 'vintimated:enabled';
+const LANG_KEY = 'vintimated:lang';
 
 const ACTION_ICONS = {
   on: { 16: 'icons/icon16.png', 24: 'icons/icon24.png', 32: 'icons/icon32.png' },
@@ -175,8 +176,8 @@ let switchedOn = true;
 // grey states do need explaining, and the welcome page on the website tells the
 // seller to read them, which makes them functional text and not decoration.
 function titleFor(colour) {
-  if (!switchedOn) return BumplineText.t('popup.tooltip.off');
-  return colour ? 'Bumpline' : BumplineText.t('popup.tooltip.notVinted');
+  if (!switchedOn) return VintimatedText.t('popup.tooltip.off');
+  return colour ? 'Vintimated' : VintimatedText.t('popup.tooltip.notVinted');
 }
 
 // Without a tabId this is the default every tab starts from; with one it is an
@@ -193,12 +194,12 @@ function paintIcon(colour, tabId) {
   const where = tabId == null ? {} : { tabId };
   try {
     Promise.resolve(action.setIcon({ ...where, path: colour ? ACTION_ICONS.on : ACTION_ICONS.off }))
-      .catch(err => console.debug('[Bumpline] could not set the icon', err));
+      .catch(err => console.debug('[Vintimated] could not set the icon', err));
     Promise.resolve(action.setTitle({ ...where, title: titleFor(colour) }))
-      .catch(err => console.debug('[Bumpline] could not set the title', err));
+      .catch(err => console.debug('[Vintimated] could not set the title', err));
   } catch (err) {
     // An older browser without these methods keeps the manifest's icon.
-    console.debug('[Bumpline] this browser has no action icon to set', err);
+    console.debug('[Vintimated] this browser has no action icon to set', err);
   }
 }
 
@@ -222,7 +223,7 @@ async function paintActiveTab() {
     const [tab] = await ext.tabs.query({ active: true, lastFocusedWindow: true });
     if (tab) paintTab(tab.id, tab.url);
   } catch (err) {
-    console.debug('[Bumpline] could not read the active tab', err);
+    console.debug('[Vintimated] could not read the active tab', err);
   }
 }
 
@@ -238,7 +239,7 @@ async function paintIconFromStore() {
   try {
     const bag = await ext.storage.local.get([ENABLED_KEY, LANG_KEY]);
     switchedOn = bag[ENABLED_KEY] !== false;
-    BumplineText.use(bag[LANG_KEY] || 'auto');
+    VintimatedText.use(bag[LANG_KEY] || 'auto');
   } catch (_) {
     switchedOn = true;
   }
@@ -259,7 +260,7 @@ ext.storage.onChanged.addListener((changes, area) => {
   const touched = ENABLED_KEY in changes || LANG_KEY in changes;
   if (!touched) return;
   if (ENABLED_KEY in changes) switchedOn = changes[ENABLED_KEY].newValue !== false;
-  if (LANG_KEY in changes) BumplineText.use(changes[LANG_KEY].newValue || 'auto');
+  if (LANG_KEY in changes) VintimatedText.use(changes[LANG_KEY].newValue || 'auto');
   paintDefault();
   paintActiveTab();
 });
@@ -307,4 +308,4 @@ ext.runtime.onInstalled.addListener(details => {
 // matters. Set on every wake rather than once: the call is cheap, and the
 // address is then right however the worker came up.
 Promise.resolve(ext.runtime.setUninstallURL(SITE + '/goodbye/'))
-  .catch(err => console.debug('[Bumpline] could not set the uninstall page', err));
+  .catch(err => console.debug('[Vintimated] could not set the uninstall page', err));
