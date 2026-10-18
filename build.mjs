@@ -1,0 +1,401 @@
+// Bumpline — packages the extension for both stores.
+// Copyright (C) 2026 g1ampy
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along
+// with this program. If not, see <https://www.gnu.org/licenses/>.
+
+// Two stores, one source tree. The only file that differs between them is the
+// manifest, and it differs in three ways Chrome and Firefox will not forgive:
+// the background entry point, the add-on id Firefox needs to keep an install
+// attached to its data, and the data-collection notice AMO asks every add-on to
+// carry. Everything else is copied byte for byte.
+//
+//   node build.mjs            both packages
+//   node build.mjs firefox    just one of them
+//
+// Output lands in build/ as a folder to load unpacked and a zip to upload.
+
+import { deflateRawSync } from 'node:zlib';
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, posix, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = dirname(fileURLToPath(import.meta.url));
+const OUT = join(ROOT, 'build');
+
+// Everything the extension needs at runtime, plus the licence the source is
+// given under. The manifest is absent on purpose: each target writes its own.
+const PAYLOAD = [
+  'background.js',
+  'bridge.js',
+  'content.js',
+  'popup.html',
+  'popup.css',
+  'popup.js',
+  // Which store this copy came from, read by the panel.
+  'store.js',
+  // Every language, and the two keys only the manifest can localise. Neither
+  // is named in a manifest key the packer follows, so an unlisted file would
+  // not ship and the extension would load without a word in it.
+  'strings.js',
+  '_locales',
+  // Inter, the typeface the shadcn preset asks for. Manifest v3 refuses a
+  // remote font, so the two Latin subsets ship with the extension, and OFL.txt
+  // is the licence they ship under.
+  'fonts',
+  'LICENSE',
+];
+
+// The off*.png are the action's grey state, set by the background worker when
+// the switch goes off; they are not manifest icons and are named in no manifest
+// key, so they have to be listed here or they would not ship.
+const ICONS = [
+  'icon16.png', 'icon24.png', 'icon32.png', 'icon48.png', 'icon128.png',
+  'off16.png', 'off24.png', 'off32.png',
+  'logo.svg',
+];
+
+// Firefox refuses an add-on whose id it cannot pin down, and without one every
+// update looks like a fresh install with an empty storage.local.
+const GECKO_ID = 'giampy@privacyrequired.com';
+
+// Manifest v3 landed in Firefox 109, but the data-collection notice below only
+// became a manifest key in 140 — which is also the current ESR, so nothing is
+// lost by asking for it.
+const GECKO_MIN = '140.0';
+const GECKO_ANDROID_MIN = '142.0';
+
+const TARGETS = {
+  // Chrome takes the manifest as it is written in the repo.
+  chrome: manifest => manifest,
+
+  firefox: manifest => {
+    const out = { ...manifest };
+
+    // A Chrome key, and Firefox's own floor is set below rather than here.
+    delete out.minimum_chrome_version;
+    
+    // Firefox has no service worker to give: an MV3 background there is an
+    // event page, woken by the same listeners and torn down the same way.
+    //
+    // strings.js comes first because an event page has no importScripts, which
+    // is how the Chrome worker pulls the catalogue in. Here the order of this
+    // array is the whole loading mechanism: background.js paints the toolbar
+    // tooltip on the way up and needs BumplineText to already be there.
+    out.background = { scripts: ['strings.js', 'background.js'] };
+
+    out.browser_specific_settings = {
+      gecko: {
+        id: GECKO_ID,
+        strict_min_version: GECKO_MIN,
+        // Nothing leaves the browser, and saying so in the manifest is what
+        // spares the reviewer from having to take it on trust.
+        data_collection_permissions: { required: ['none'] },
+      },
+      // Android got the same key two releases later. Whether the add-on is
+      // offered on phones at all is a switch on the store listing; this only
+      // says which builds could run it if it is.
+      gecko_android: { strict_min_version: GECKO_ANDROID_MIN },
+    };
+
+    return out;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// A zip writer, because the alternatives are a dependency or PowerShell's
+// Compress-Archive, which writes backslash-separated entries that both stores
+// reject. Deflate, no zip64: the whole package is well under a megabyte.
+// ---------------------------------------------------------------------------
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, byte) => {
+  let value = byte;
+  for (let bit = 0; bit < 8; bit++) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
+
+function crc32(buffer) {
+  let value = 0xffffffff;
+  for (const byte of buffer) value = CRC_TABLE[(value ^ byte) & 0xff] ^ (value >>> 8);
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+function zip(entries) {
+  const locals = [];
+  const central = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name, 'utf8');
+    const deflated = deflateRawSync(entry.data);
+
+    // Deflate is not guaranteed to shrink anything; store the original when it
+    // does not, which is what every other zip writer does.
+    const stored = deflated.length >= entry.data.length;
+    const body = stored ? entry.data : deflated;
+    const method = stored ? 0 : 8;
+    const sum = crc32(entry.data);
+
+    const local = Buffer.alloc(30 + name.length);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4); // version needed
+    local.writeUInt16LE(0x0800, 6); // utf-8 names
+    local.writeUInt16LE(method, 8);
+    local.writeUInt16LE(0, 10); // time — fixed, so a rebuild is reproducible
+    local.writeUInt16LE(0x21, 12); // date — 1 January 1980
+    local.writeUInt32LE(sum, 14);
+    local.writeUInt32LE(body.length, 18);
+    local.writeUInt32LE(entry.data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    local.writeUInt16LE(0, 28); // extra field
+    name.copy(local, 30);
+
+    const header = Buffer.alloc(46 + name.length);
+    header.writeUInt32LE(0x02014b50, 0);
+    header.writeUInt16LE(20, 4); // version made by
+    header.writeUInt16LE(20, 6); // version needed
+    header.writeUInt16LE(0x0800, 8);
+    header.writeUInt16LE(method, 10);
+    header.writeUInt16LE(0, 12);
+    header.writeUInt16LE(0x21, 14);
+    header.writeUInt32LE(sum, 16);
+    header.writeUInt32LE(body.length, 20);
+    header.writeUInt32LE(entry.data.length, 24);
+    header.writeUInt16LE(name.length, 28);
+    // Extra field, comment, disk number and both attribute words stay zero.
+    header.writeUInt32LE(offset, 42);
+    name.copy(header, 46);
+
+    locals.push(local, body);
+    central.push(header);
+    offset += local.length + body.length;
+  }
+
+  const directory = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+
+  return Buffer.concat([...locals, directory, end]);
+}
+
+// ---------------------------------------------------------------------------
+
+// Walks a file or a directory into the flat list of names the zip wants, with
+// forward slashes on every platform.
+function collect(source, name, into) {
+  const path = resolve(ROOT, source);
+  if (statSync(path).isDirectory()) {
+    for (const child of readdirSync(path).sort()) {
+      collect(join(path, child), posix.join(name, child), into);
+    }
+    return;
+  }
+  into.push({ name, data: readFileSync(path) });
+}
+
+function build(target, manifest) {
+  const version = manifest.version;
+  const stem = `bumpline-${version}-${target}`;
+  const folder = join(OUT, stem);
+
+  const entries = [
+    { name: 'manifest.json', data: Buffer.from(JSON.stringify(TARGETS[target](manifest), null, 2) + '\n', 'utf8') },
+  ];
+  for (const item of PAYLOAD) collect(item, item, entries);
+  for (const icon of ICONS) collect(join('icons', icon), posix.join('icons', icon), entries);
+
+  // The unpacked folder is what you load while developing; the zip is what the
+  // store takes. Both are rebuilt from scratch so a deleted source file cannot
+  // survive in the output.
+  rmSync(folder, { recursive: true, force: true });
+  for (const entry of entries) {
+    const path = join(folder, entry.name);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, entry.data);
+  }
+
+  const archive = join(OUT, `${stem}.zip`);
+  writeFileSync(archive, zip(entries));
+
+  const size = (statSync(archive).size / 1024).toFixed(0);
+  console.log(`${target}: ${relative(ROOT, archive)} (${entries.length} files, ${size} kB)`);
+}
+
+// The two catalogues have to hold the same keys, and every key the code asks
+// for has to be in them. Nothing else in this repository is tested, so the
+// check runs where the package is made: a translation that drifted is caught
+// before it is uploaded rather than by a seller reading a key name on a button.
+function checkCatalogues() {
+  const source = readFileSync(join(ROOT, 'strings.js'), 'utf8');
+  const { CATALOG } = new Function(
+    'navigator', 'document',
+    source + '; return BumplineText;',
+  )({ language: 'en' }, { querySelectorAll: () => [], documentElement: {} });
+
+  // The language every other one is a translation of, and the one strings.js
+  // falls back to; it is named here rather than read from there because a
+  // catalogue that lost it would fail this check rather than pass it quietly.
+  const BASE_LANG = 'en';
+
+  const languages = Object.keys(CATALOG);
+  const complaints = [];
+
+  for (const lang of languages) {
+    for (const other of languages) {
+      for (const key of Object.keys(CATALOG[other])) {
+        if (!(key in CATALOG[lang])) complaints.push(`${lang} is missing ${key}`);
+      }
+    }
+  }
+
+  // A sentence that lost a {1} in translation renders the two characters "{1}"
+  // to a seller, and every check above it stays quiet: the key is present, the
+  // key is asked for, the line is a string. What it no longer is, is the same
+  // sentence. English is the shape the code writes its substitutions to fit, so
+  // English is what every other language is measured against.
+  const slotsOf = line =>
+    new Set([...String(line).matchAll(/\{(\d+)\}/g)].map(match => match[1]));
+  for (const key of Object.keys(CATALOG[BASE_LANG])) {
+    const wanted = slotsOf(CATALOG[BASE_LANG][key]);
+    for (const lang of languages) {
+      if (lang === BASE_LANG || !(key in CATALOG[lang])) continue;
+      const got = slotsOf(CATALOG[lang][key]);
+      const missing = [...wanted].filter(slot => !got.has(slot));
+      const extra = [...got].filter(slot => !wanted.has(slot));
+      if (missing.length) complaints.push(`${lang} ${key} drops {${missing.join('}, {')}}`);
+      if (extra.length) complaints.push(`${lang} ${key} invents {${extra.join('}, {')}}`);
+    }
+  }
+
+  // paint() draws a catalogue line's emphasis by building the nodes itself, and
+  // it knows two tags: <b> and <i>. A third one added to a sentence here would
+  // not break anything loudly — it would reach the seller as its own angle
+  // brackets, mid-paragraph, in one language only. This is the other end of
+  // that rule: the drawing code cannot render a tag it does not know, and the
+  // build will not ship a catalogue that contains one.
+  const TAG = /<\/?([a-zA-Z][^\s/>]*)[^>]*>/g;
+  for (const lang of languages) {
+    for (const [key, line] of Object.entries(CATALOG[lang])) {
+      // By name rather than by match, or a stray <span>…</span> is two
+      // complaints about one mistake.
+      const strangers = new Set(
+        [...String(line).matchAll(TAG)]
+          .map(found => found[1].toLowerCase())
+          .filter(name => name !== 'b' && name !== 'i'),
+      );
+      for (const name of strangers) {
+        complaints.push(`${lang} ${key} carries <${name}>, which paint() cannot draw`);
+      }
+      // An unclosed <b> is the same sentence with the emphasis silently gone,
+      // since a tag that never matches its closer is left standing as text.
+      for (const name of ['b', 'i']) {
+        const open = (String(line).match(new RegExp(`<${name}>`, 'g')) || []).length;
+        const close = (String(line).match(new RegExp(`</${name}>`, 'g')) || []).length;
+        if (open !== close) complaints.push(`${lang} ${key} has ${open} <${name}> and ${close} </${name}>`);
+      }
+    }
+  }
+
+  // Every t('…') written in the code — single-quoted, double-quoted or
+  // backtick-quoted — and every data-i18n attribute in the panel, has to name a
+  // key that exists.
+  const CONSUMERS = ['background.js', 'content.js', 'popup.js', 'popup.html'];
+
+  // The scan above reads a key only where it is written straight after t(, and
+  // that is not where thirteen of them are written: a ternary picks one of two
+  // keys and hands t() the result, and a lookup table holds a column of them.
+  // Those are exactly the keys most likely to be renamed on one side only, so
+  // they are found a second way — by their own shape. A catalogue key is a
+  // namespace, a dot, and the rest; no selector, storage key or test id in this
+  // repository begins with one of these words followed by a dot, so a quoted
+  // string that does is a key and is checked as one.
+  const NAMESPACES = [
+    'button', 'toast', 'card', 'size', 'budget',
+    'relist', 'age', 'pause', 'popup', 'footer',
+  ];
+  const KEY_SHAPED = new RegExp(
+    `(['"\`])((?:${NAMESPACES.join('|')})\\.[A-Za-z0-9.]+)\\1`,
+    'g',
+  );
+
+  // popup.html links "popup.css" and loads "popup.js"; both are the shape above
+  // and neither is a key. A catalogue key never ends in a file extension, which
+  // is a narrower thing to say than dropping the popup namespace — and that
+  // namespace is where most of the keys this pass exists for actually live.
+  const FILE_LIKE = /\.(css|js|mjs|html|json|png|svg|txt)$/i;
+
+  for (const file of CONSUMERS) {
+    const text = readFileSync(join(ROOT, file), 'utf8');
+    const asked = [
+      ...[...text.matchAll(/\b[tT]\(\s*(['"`])([^'"`]+)\1/g)].map(match => match[2]),
+      ...[...text.matchAll(/data-i18n(?:-title|-label|-em)?="([^"]+)"/g)].map(match => match[1]),
+      ...[...text.matchAll(KEY_SHAPED)].map(match => match[2]).filter(key => !FILE_LIKE.test(key)),
+    ];
+    for (const key of asked) {
+      if (!(key in CATALOG.en)) complaints.push(`${file} asks for ${key}, which en does not have`);
+    }
+  }
+
+  // The store reads the extension's name and description from these, not from
+  // the catalogue above, and a key present in one file and absent from the other
+  // is a listing that falls back to English without saying so.
+  //
+  // Which languages to expect comes from the catalogue rather than a list kept
+  // here: a language the extension speaks with no _locales folder of its own is
+  // exactly the omission this check exists to catch, and a list written out
+  // twice is a list that only agrees with itself until somebody forgets.
+  const locales = Object.keys(CATALOG);
+  const messages = {};
+  for (const lang of locales) {
+    const path = join(ROOT, '_locales', lang, 'messages.json');
+    try {
+      messages[lang] = JSON.parse(readFileSync(path, 'utf8'));
+    } catch (err) {
+      complaints.push(`_locales/${lang}/messages.json will not parse: ${err.message}`);
+    }
+  }
+  for (const lang of locales) {
+    for (const other of locales) {
+      if (!messages[lang] || !messages[other]) continue;
+      for (const key of Object.keys(messages[other])) {
+        if (!(key in messages[lang])) complaints.push(`_locales/${lang} is missing ${key}`);
+      }
+    }
+  }
+
+  if (complaints.length) {
+    throw new Error(`the catalogues disagree:\n  ${complaints.join('\n  ')}`);
+  }
+}
+
+const manifest = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8'));
+const asked = process.argv.slice(2);
+const wanted = asked.length ? asked : Object.keys(TARGETS);
+
+checkCatalogues();
+
+for (const target of wanted) {
+  if (!TARGETS[target]) {
+    console.error(`unknown target "${target}" — pick from ${Object.keys(TARGETS).join(', ')}`);
+    process.exitCode = 1;
+    continue;
+  }
+  mkdirSync(OUT, { recursive: true });
+  build(target, manifest);
+}
