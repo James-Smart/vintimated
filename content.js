@@ -2846,6 +2846,17 @@
         box = document.createElement('input');
         box.type = 'checkbox';
         box.className = CLASS.select;
+        // The fence publish and draft raise, for the same reason: a click on
+        // the box must not reach Vinted's card link or card click handler, or
+        // ticking it navigates away with the selection and any walk queued.
+        // preventDefault is deliberately not raised — it cancels the very
+        // toggle the box is for, and the browser restores the old state after
+        // every handler has run, overwriting any state set here. So the
+        // toggle stays the browser's, and change, which fires after it with
+        // the new state, turns it into a selection.
+        box.addEventListener('click', event => {
+          event.stopPropagation();
+        });
         box.addEventListener('change', () => {
           if (box.checked) selection.set(id, true);
           else selection.delete(id);
@@ -2866,9 +2877,9 @@
   }
 
   // The bar: what is picked, what the walk is doing, and the five controls.
-  // Built once and painted from state on every pass, so a re-render or a
-  // language change costs a repaint rather than a new bar — and a walk under
-  // way keeps its Stop, which is the one button that must survive one.
+  // Built once and mounted, painted from state on every pass, so a re-render
+  // costs a repaint rather than a new bar — and a walk under way keeps its
+  // Stop, which is the one button that must survive one.
   function buildBulkBar() {
     const bar = document.createElement('div');
     bar.id = BAR_ID;
@@ -2938,11 +2949,24 @@
   }
 
   function paintBulkBar() {
-    let bar = document.getElementById(BAR_ID);
-    if (!bar) bar = buildBulkBar();
+    // Off means off on every path in, the walk's .finally included: that
+    // pass must not bring the bar back after applyEnabled(false) took it
+    // down with the rest of our UI.
+    if (enabled !== true) return;
 
-    // Hidden while there is nothing relistable to put it to work on.
-    bar.hidden = !document.querySelector(SELECTOR.ourItem);
+    let bar = document.getElementById(BAR_ID);
+    // Mounted on first build and never rebuilt after: the five listeners
+    // live on this bar, so a re-render costs a repaint rather than another
+    // bar and five more listeners into the garbage.
+    if (!bar) {
+      bar = buildBulkBar();
+      document.body.appendChild(bar);
+    }
+
+    // Hidden while there is nothing relistable to put it to work on — except
+    // mid-walk: the per-item settle drops cards as it goes, and Stop must
+    // stay reachable for the whole walk.
+    bar.hidden = !document.querySelector(SELECTOR.ourItem) && !bulkQueue;
 
     // Text is written only when it changes. attachButtons runs on every
     // mutation of the page and this repaints from it, so a write of the same
