@@ -6,6 +6,16 @@ and including 1.1.4 are Bumpline's, the project Vintimated was forked from.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-10-18
+
+Nothing a seller sees says Bumpline any more. The page that opens on install
+and the one that opens after uninstall now point at this project's own
+repository — the README for the first, the issue tracker for the last — as do
+the popup's "How it works" and "Report a problem" links. The review link now
+hides itself until Vintimated has store listings of its own, instead of
+opening Bumpline's, and the logo asset carries its own name. Six regression
+tests pin every shipped surface so none of it can drift back.
+
 ## [1.2.0] - 2026-10-18
 
 The first release of the fork, and with it the two things the fork was made

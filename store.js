@@ -29,8 +29,9 @@ const VintimatedStore = (() => {
   // in question here, not the promises, so either will do.
   const ext = globalThis.browser ?? globalThis.chrome;
 
-  // The 32-letter id in the Chrome Web Store listing URL.
-  const CHROME_STORE_ID = 'bckdngndomabedcpciejiojhjfheolkn';
+  // The 32-letter id in the Chrome Web Store listing URL. Empty, like
+  // FIREFOX_ADDON_ID below, means the fork has no listing in that store yet.
+  const CHROME_STORE_ID = '';
 
   // AMO's slug, which is the last path segment of the listing it gives the
   // add-on on the first submission — addons.mozilla.org/…/addon/<this>/. It is
@@ -45,7 +46,7 @@ const VintimatedStore = (() => {
   // store yet: a link to a page that does not exist is worse than no link, so
   // whatever asks for it hides itself instead. A wrong value is worse than
   // both, because nothing hides and the seller finds the 404.
-  const FIREFOX_ADDON_ID = 'bumpline-vinted-relister';
+  const FIREFOX_ADDON_ID = '';
 
   // The extension's own origin, which is the one thing a browser cannot get
   // wrong about its own extension: Firefox serves these pages from
@@ -73,8 +74,14 @@ const VintimatedStore = (() => {
         ? 'https://addons.mozilla.org/firefox/addon/' + FIREFOX_ADDON_ID + '/reviews/'
         : null;
     }
-    return 'https://chromewebstore.google.com/detail/' + CHROME_STORE_ID + '/reviews';
+    return CHROME_STORE_ID
+      ? 'https://chromewebstore.google.com/detail/' + CHROME_STORE_ID + '/reviews'
+      : null;
   }
 
   return { isFirefox, reviewUrl };
 })();
+
+// Node's test runner reads the same object the panel does; the browser has no
+// `module`, so this line is inert where the extension runs.
+if (typeof module !== 'undefined') module.exports = VintimatedStore;

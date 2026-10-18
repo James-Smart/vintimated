@@ -282,30 +282,30 @@ ext.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   paintTab(tabId, tab && tab.url);
 });
 
-// The first page a seller sees and the last one both live on the website. The
-// first shows the pinning steps for the browser it opens in and can be
-// corrected without a store review; the last opens after the extension is
-// gone, so it could not live anywhere else. Both are plain visits to a static
-// site, in the language the browser asks for, with nothing of the seller's
-// attached to them.
-const SITE = 'https://bumpline.giampy.tech';
+// The first page a seller sees and the last one both live with the project's
+// source. The first is the README, whose install section shows the pinning
+// steps for the browser it opens in and can be corrected without a store
+// review; the last opens after the extension is gone, so it could not live
+// inside it. Both are plain visits to a public page, in the language the
+// browser asks for, with nothing of the seller's attached to them.
+const SITE = 'https://github.com/James-Smart/vintimated';
 
 // Installed from the store the extension draws nothing anywhere until you are
 // on your own Vinted wardrobe, so a new user sees an empty toolbar and assumes
-// it is broken. Opening the welcome page once answers where the icon went and
+// it is broken. Opening the README once answers where the icon went and
 // where the buttons appear. An update is not a first impression, so it passes.
 ext.runtime.onInstalled.addListener(details => {
   if (details.reason !== 'install') return;
-  ext.tabs.create({ url: SITE + '/welcome/' });
+  ext.tabs.create({ url: SITE + '#readme' });
 });
 
 // The browser opens this address once the extension has been removed: the one
-// moment a seller who gave up on it can still say why. The page sends nothing
-// by itself. What the seller writes becomes a GitHub issue they read before
-// posting it. The address carries no version number either, because Firefox
-// counts facts about the add-on as technical data, which may only be collected
-// with the user's consent, and a seller who is leaving can type it if it
-// matters. Set on every wake rather than once: the call is cheap, and the
-// address is then right however the worker came up.
-Promise.resolve(ext.runtime.setUninstallURL(SITE + '/goodbye/'))
+// moment a seller who gave up on it can still say why. It is the project's
+// issue tracker, where what the seller writes becomes an issue they can read
+// before posting. The address carries no version number either, because
+// Firefox counts facts about the add-on as technical data, which may only be
+// collected with the user's consent, and a seller who is leaving can type it
+// if it matters. Set on every wake rather than once: the call is cheap, and
+// the address is then right however the worker came up.
+Promise.resolve(ext.runtime.setUninstallURL(SITE + '/issues'))
   .catch(err => console.debug('[Vintimated] could not set the uninstall page', err));
