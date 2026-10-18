@@ -1414,28 +1414,37 @@
     return days === 1 ? T('age.dayAgo') : T('age.daysAgo', days);
   };
 
-  async function loadWardrobePage(page) {
-    const member = currentMemberId();
-    if (!member) return null;
-
+  // The header set the listing endpoints answer: the token pair and the
+  // referer Vinted's own paging carries, so a wardrobe read looks exactly
+  // like the reads the page itself makes. Shared by the wardrobe index and
+  // "Relist all"'s ladder below — the same reading must not be two request
+  // shapes that drift apart.
+  async function listingHeaders() {
     let csrf = null;
     try {
       csrf = await csrfToken();
     } catch (_) {
-      // The listing endpoint tolerates a missing token.
+      // The listing endpoints tolerate a missing token.
     }
     const anon = await anonymousId();
+    return {
+      accept: 'application/json, text/plain, */*',
+      ...(csrf ? { 'x-csrf-token': csrf } : {}),
+      ...(anon ? { 'x-anon-id': anon } : {}),
+      referer: location.href,
+    };
+  }
+
+  async function loadWardrobePage(page) {
+    const member = currentMemberId();
+    if (!member) return null;
+
     const query = new URLSearchParams({ page: String(page), per_page: '20', order: 'relevance' });
 
     try {
       const reply = await bridgedFetch(`${SITE}/api/v2/wardrobe/${member}/items?${query}`, {
         credentials: 'include',
-        headers: {
-          accept: 'application/json, text/plain, */*',
-          ...(csrf ? { 'x-csrf-token': csrf } : {}),
-          ...(anon ? { 'x-anon-id': anon } : {}),
-          referer: location.href,
-        },
+        headers: await listingHeaders(),
       });
       // The one call that runs on every page load, and so the only chance the
       // extension has of hearing a rate limit before a seller presses
@@ -2642,7 +2651,7 @@
   let bulkProgress = '';
 
   // Which items "all" is allowed to mean. canRelist answers this for a card
-  // out of the wardrobe index; this answers it from the user-items reply,
+  // out of the wardrobe index; this answers it from the listing replies,
   // keying on the same three fields that decide copyability there: an item is
   // out when it is closed (is_closed), when something is closing it
   // (item_closing_action), or when Vinted says it can no longer be edited
@@ -2663,48 +2672,99 @@
   }
 
   // "Relist all" needs the whole wardrobe and the page only holds what has
-  // scrolled into view, so the ids are read from Vinted's own listing of the
+  // scrolled into view, so the ids are read from Vinted's own listings of the
   // member's items, a screenful at a time, until a page comes back empty.
   // Sold and reserved items never make it out of here: filterEditable keeps
   // only what Vinted would still let us copy.
+  //
+  // A ladder of rungs, tried in order: the users/items route first, then the
+  // wardrobe index (loadWardrobePage) — the paged call this file already
+  // trusts, whose items carry the very fields isCopyable reads — and only
+  // then the cards on screen. The users route was written against an
+  // unverified shape and Vinted may change it; one failed rung must not cost
+  // the seller the "all" in "Relist all" when a proven paged source is one
+  // rung down. Every rung pages the same way and filters through the same
+  // predicate, so the answer is the same wardrobe whichever rung gives it.
+  //
+  // A refusal from Vinted ends the whole question rather than one rung: it is
+  // recorded like every other refusal is (noteRefusal), and a walk must never
+  // start on the heels of a stop — not on the next rung, not on the fallback
+  // ids. The stand-down gate is re-read before anything may be queued.
+
+  // One page of the users/items route: the raw items, or null when the rung
+  // cannot be walked — refused, broken, or changed shape — so the next rung
+  // is owed an answer.
+  async function usersItemsPage(member, page) {
+    try {
+      const reply = await bridgedFetch(
+        `${SITE}/api/v2/users/${member}/items?per_page=96&page=${page}`,
+        { credentials: 'include', headers: await listingHeaders() },
+      );
+      if (!reply.ok) {
+        // Every sibling call site routes a refused reply through
+        // noteRefusal; this one used to just fall back, which made a 429 or
+        // bot challenge here invisible to the stand-down machinery and sent
+        // the fallback ids out right behind the refusal.
+        await noteRefusal(reply, await reply.text().catch(() => ''));
+        return null;
+      }
+      const parsed = await reply.json().catch(() => null);
+      // The wardrobe index answers { items: [...] }; a bare array is the
+      // same shape without the wrapper. Anything else is the endpoint
+      // having changed under us.
+      const items = Array.isArray(parsed) ? parsed : parsed && parsed.items;
+      return Array.isArray(items) ? items : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // One rung, paged: page one onwards until the empty page that ends the
+  // walk, the ids isCopyable accepts collected in order. null out means the
+  // rung did not answer and the next one is tried.
+  async function collectIds(fetchPage) {
+    const found = [];
+    for (let page = 1; page <= 50; page += 1) {
+      let items = null;
+      try {
+        items = await fetchPage(page);
+      } catch (_) {
+        return null;
+      }
+      if (!Array.isArray(items)) return null;
+      if (!items.length) return found; // the empty page that ends the walk
+      for (const id of BulkQueue.filterEditable(items, isCopyable)) {
+        found.push(String(id));
+      }
+      await pause(100); // stay polite with the API
+    }
+    return found;
+  }
+
   async function enumeratedIds() {
     const member = currentMemberId();
-    const found = [];
-    let page = 1;
-    let answered = Boolean(member);
-
-    while (answered && page <= 50) {
-      try {
-        const reply = await bridgedFetch(
-          `${SITE}/api/v2/users/${member}/items?per_page=96&page=${page}`,
-          { credentials: 'include' },
-        );
-        if (!reply.ok) {
-          answered = false;
-          break;
-        }
-        const parsed = await reply.json().catch(() => null);
-        // The wardrobe index answers { items: [...] }; a bare array is the
-        // same shape without the wrapper. Anything else is the endpoint
-        // having changed under us.
-        const items = Array.isArray(parsed) ? parsed : parsed && parsed.items;
-        if (!Array.isArray(items)) {
-          answered = false;
-          break;
-        }
-        if (!items.length) break; // the empty page that ends the walk
-        for (const id of BulkQueue.filterEditable(items, isCopyable)) {
-          found.push(String(id));
-        }
-        page += 1;
-        await pause(100); // stay polite with the API
-      } catch (_) {
-        answered = false;
-      }
+    const rungs = [];
+    if (member) {
+      rungs.push(page => usersItemsPage(member, page));
+      // The proven rung: the same request, shape and paging the wardrobe
+      // index has always made on this account.
+      rungs.push(loadWardrobePage);
     }
 
-    if (answered && found.length) return found;
-    // The endpoint erred, changed shape, or came back empty while the page
+    for (const rung of rungs) {
+      const found = await collectIds(rung);
+      // A refusal is not a rung that failed, it is the walk being called
+      // off. Whatever any rung found, nothing is queued behind a stop.
+      const paused = await readBlock();
+      if (paused) {
+        applyLock(paused);
+        toast(T('toast.pausedUntil', clockOf(paused.until)), 'bad');
+        return [];
+      }
+      if (found && found.length) return found;
+    }
+
+    // Every rung erred, changed shape, or came back empty while the page
     // plainly shows relistable cards. What is on screen is the honest answer,
     // and the seller is told it is only what is on screen.
     toast(T('bulk.fallback'), 'bad');
