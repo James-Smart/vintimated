@@ -2324,8 +2324,12 @@
   // card passes nothing), reload: false to hold the page still when the run
   // settles, and budgetPreapproved: true to skip the volume-alarm question —
   // a queue has asked it once for the whole walk and must not be asked again
-  // per item once the limits trip. relist below is the button's thin wrapper
-  // over this; a queue can drive the same run with no button at all.
+  // per item once the limits trip. quiet: true keeps the run free of windows
+  // as well: the size question is routed to its cancel path before the delete
+  // and to the recovery banner after it, so a run nobody is watching (the
+  // schedule) never puts a modal in front of anyone. relist below is the
+  // button's thin wrapper over this; a queue can drive the same run with no
+  // button at all.
   //
   // The promise answers whether the relist finished (true) or not (false): a
   // queue counts what came through, and a failure swallowed here would else be
@@ -2487,7 +2491,11 @@
           throw new Error(T('size.unavailable', size.why));
         }
         hooks.label(T('button.waitingSize'));
-        const chosen = await askForSize(size.groups, item.title, size.why);
+        // A quiet run never raises the window: the question is routed to its
+        // cancel path — the run answers false, nothing is recorded, and the
+        // original is still intact (this is all before the delete) — so the
+        // firing simply did not happen.
+        const chosen = hooks.quiet ? null : await askForSize(size.groups, item.title, size.why);
         if (!chosen) throw new Error(T('size.cancelled'));
         item.size_id = chosen;
         item.item_attributes = withSize(item.item_attributes, chosen);
@@ -2577,7 +2585,11 @@
         (attempt, total) => {
           hooks.label(attempt === 1 ? T('button.publishing') : T('button.retrying', attempt, total));
         },
-        true,
+        // A quiet run passes no canAsk: a size refusal after the delete stores
+        // the record and raises the recovery banner — the existing "ask when
+        // the seller is back" behavior — instead of a window over an original
+        // that is already gone.
+        !hooks.quiet,
       );
       if (newId) await settle(itemId, T('toast.relisted'), settleOptions);
       // On failure advancePending has already stored the record and raised the
@@ -3210,6 +3222,14 @@
     }
   }
 
+  // Run identity: the period a start drew, named by its startedAt. A wake
+  // works for exactly one run — the one the books named when it woke — and a
+  // start that lands under it is another run entirely, whatever either set of
+  // books says. Not merely 'running': a new run is running too, and its books
+  // are not this wake's to write a fire event into.
+  const sameRun = (a, b) =>
+    Boolean(a && b && a.startedAt != null && a.startedAt === b.startedAt);
+
   // One knock's worth of work — or one page load's; both ask the same
   // question at different moments. At most one relist comes out of it,
   // however long it has been since the last.
@@ -3301,14 +3321,15 @@
         return;
       }
 
-      // At the last possible moment the books must still say 'running': a
-      // Stop or Abort that landed while the pick walked must not be fired
-      // over — nothing new starts once the run is ending. Read before the
-      // floor is touched, so an ended run never re-claims a claim its end
-      // already dropped.
-      const standing = Scheduler.deserialize(await readSetting(SCHEDULE_KEY, null));
-      if (standing.status !== 'running') {
-        trace('schedule: the run ended before the firing');
+      // At the last possible moment the books must still be this wake's run
+      // and still say 'running': an ending must not be fired over, and a
+      // start that landed while the pick walked is a different run — nothing
+      // starts for one this wake never worked for. Read before the floor is
+      // touched, so an ended run never re-claims a claim its end already
+      // dropped.
+      const gate = Scheduler.deserialize(await readSetting(SCHEDULE_KEY, null));
+      if (gate.status !== 'running' || !sameRun(gate, state)) {
+        trace('schedule: the run changed before the firing');
         return;
       }
 
@@ -3334,27 +3355,37 @@
           card: () => engineCard(id),
           reload: false,
           budgetPreapproved: true,
+          // And no windows, ever: the size question goes to its cancel path
+          // before the delete and to the recovery banner after it.
+          quiet: true,
         });
       } finally {
         await noteWorking(null);
       }
 
       if (ok) {
-        // --- the books. The gap is drawn once here and carried in the event,
-        // so no later decision can redraw the wait it is checking, and the
-        // state goes back where the background's alarm follows it.
-        const fired = Scheduler.transition(state, {
-          type: 'fire',
-          now: Date.now(),
-          id,
-          gapMs: Scheduler.nextGapMs(defn, Math.random),
-        });
+        // --- the books, read fresh and used as the base of the transition:
+        // the fire event lands on what is on disk now, never on the snapshot
+        // this wake started from — a pause or a resume that landed while the
+        // relist was in hand rides through untouched — and the gap is drawn
+        // once here and carried in the event, so no later decision can redraw
+        // the wait it is checking. Only this wake's own run is written over at
+        // all: the fresh books are matched back to that snapshot by run
+        // identity (startedAt, not merely 'running'), so a start or an ending
+        // that landed mid-relist wins over a fire event that would quietly
+        // revert it. A record lost that way is safe: the relist made the
+        // listing brand new, and the feed cannot pick a brand-new one.
         try {
-          // Only a run still going is written over: an ending that landed
-          // while the relist was in hand must not be talked back into
-          // 'running'.
-          const current = await readSetting(SCHEDULE_KEY, null);
-          if (current && Scheduler.deserialize(current).status === 'running') {
+          const standing = Scheduler.deserialize(await readSetting(SCHEDULE_KEY, null));
+          if (standing.status !== 'running' || !sameRun(standing, state)) {
+            trace('schedule: the books moved on while the relist was in hand; nothing written');
+          } else {
+            const fired = Scheduler.transition(standing, {
+              type: 'fire',
+              now: Date.now(),
+              id,
+              gapMs: Scheduler.nextGapMs(defn, Math.random),
+            });
             await ext.storage.local.set({ [SCHEDULE_KEY]: Scheduler.serialize(fired) });
           }
         } catch (err) {
