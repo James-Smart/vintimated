@@ -76,6 +76,31 @@ const Scheduler = (() => {
     return Math.max(0, defn.maxPerDay - todayCount);
   }
 
+  // The manual volume alarms, the same pair content.js and popup.js carry:
+  // four an hour, fifteen a day. Neither number is Vinted's — Vinted
+  // publishes none — and the plan pins them as never to be weakened. This
+  // file keeps its own copy because it is loaded in worlds that see neither
+  // of those files.
+  const HOUR_ALARM_AT = 4;
+  const DAY_ALARM_AT = 15;
+
+  // The budget gate a scheduled firing passes before it touches anything:
+  // would the relist it is about to make be one the manual alarms would have
+  // questioned? The counts arrive from the one shared relistLog (thisHour
+  // over the hour's window, today over the day's), so a manual relist counts
+  // here exactly like a scheduled one — one log, one truth. The +1 is the
+  // next relist itself: the gate holds when that relist would carry the
+  // count past an alarm, which is the same line runRelist's dialog draws, so
+  // a scheduled firing never lands where a dialog would have to answer for
+  // it. On a hold the caller records nothing — no fire event, no done id —
+  // and the next wake simply re-decides. The day is asked first: it is the
+  // wider net and, when both are spent, the reason worth naming.
+  function holdForBudget(counts) {
+    if (counts.today + 1 > DAY_ALARM_AT) return { hold: true, until: 'day' };
+    if (counts.thisHour + 1 > HOUR_ALARM_AT) return { hold: true, until: 'hour' };
+    return { hold: false, until: null };
+  }
+
   // The first moment the window opens on an allowed day at or after `fromDate`
   // and strictly after `lowerBound`. Strictly after, so a wait is always a
   // wait: no decision can hand back zero and spin the caller. An empty
@@ -138,6 +163,25 @@ const Scheduler = (() => {
   // seller picked out.
   function inScope(defn, itemId, selection) {
     return defn.scope === 'all' ? true : selection.has(itemId);
+  }
+
+  // The feed's one question: which id does the run relist next? The first
+  // item in the caller's order that is old enough and open (eligible), is
+  // inside the seller's scope (inScope), and is not one this run has already
+  // relisted — doneIds arrives as a Set the caller builds off the state,
+  // where transition's fire events have been appending one id at a time, so
+  // a period touches each item once. None of the three is a ranking: the
+  // walk's own order decides ties, so the answer is the ladder's first word
+  // and nothing is sorted here. Nothing qualifying comes back null.
+  function pickNext(items, defn, selection, doneIds) {
+    const take = eligible(defn);
+    for (const item of items) {
+      if (!take(item)) continue;
+      if (!inScope(defn, item.id, selection)) continue;
+      if (doneIds.has(item.id)) continue;
+      return item.id;
+    }
+    return null;
   }
 
   // The tab holding the run alive is only believed while its lease lasts.
@@ -259,9 +303,11 @@ const Scheduler = (() => {
     isWithinWindow,
     nextGapMs,
     capacityLeft,
+    holdForBudget,
     decide,
     eligible,
     inScope,
+    pickNext,
     transition,
     dayKey,
     leaseValid,

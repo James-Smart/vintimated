@@ -399,3 +399,97 @@ test('deserialize: anything malformed comes back as a fresh idle state', () => {
     assert.deepEqual(Scheduler.deserialize(garbage), idle);
   }
 });
+
+test('pickNext: the first eligible in-scope id in input order wins', () => {
+  const items = [
+    { id: 1, ageDays: 3, closed: false }, // below the threshold
+    { id: 2, ageDays: 7, closed: false }, // <- the first that qualifies
+    { id: 3, ageDays: 30, closed: false }, // qualifies, but later in line
+  ];
+  assert.equal(Scheduler.pickNext(items, defn(), new Set(), new Set()), 2);
+});
+
+test('pickNext: below-threshold, closed, out-of-scope and done ids are skipped', () => {
+  const d = defn({ ageThresholdDays: 7, scope: 'selected' });
+  const selection = new Set(['b', 'c', 'e']);
+  const doneIds = new Set(['c']);
+  const items = [
+    { id: 'a', ageDays: 30, closed: false }, // never picked out
+    { id: 'b', ageDays: 6, closed: false }, // too young
+    { id: 'c', ageDays: 30, closed: false }, // already relisted this run
+    { id: 'd', ageDays: 30, closed: true }, // closed: nothing to refresh
+    { id: 'e', ageDays: 30, closed: false }, // <- the first to survive
+    { id: 'f', ageDays: 30, closed: false },
+  ];
+  assert.equal(Scheduler.pickNext(items, d, selection, doneIds), 'e');
+
+  // Under 'all' the selection is not consulted at all; the done ids still are.
+  assert.equal(Scheduler.pickNext(items, defn({ ageThresholdDays: 7 }), new Set(), doneIds), 'a');
+});
+
+test('pickNext: nothing qualifying comes back null', () => {
+  assert.equal(Scheduler.pickNext([], defn(), new Set(), new Set()), null);
+  const onlyDone = [{ id: 1, ageDays: 30, closed: false }];
+  assert.equal(Scheduler.pickNext(onlyDone, defn(), new Set(), new Set([1])), null);
+  const tooYoung = [{ id: 1, ageDays: 3, closed: false }];
+  assert.equal(Scheduler.pickNext(tooYoung, defn(), new Set(), new Set()), null);
+});
+
+// The pair of manual volume alarms the budget gate holds to — the same
+// numbers content.js and popup.js carry (four an hour, fifteen a day),
+// pinned by the plan as never to be weakened. The counts a caller brings are
+// read off the one shared relistLog, so they cannot tell a hand relist from
+// a scheduled one and must not try.
+const HOUR_ALARM_AT = 4;
+const DAY_ALARM_AT = 15;
+
+test('holdForBudget: one under each cap is not held — the +1 is the next relist', () => {
+  assert.deepEqual(Scheduler.holdForBudget({ thisHour: 0, today: DAY_ALARM_AT - 1 }), {
+    hold: false,
+    until: null,
+  });
+  assert.deepEqual(Scheduler.holdForBudget({ thisHour: HOUR_ALARM_AT - 1, today: 0 }), {
+    hold: false,
+    until: null,
+  });
+  assert.deepEqual(
+    Scheduler.holdForBudget({ thisHour: HOUR_ALARM_AT - 1, today: DAY_ALARM_AT - 1 }),
+    { hold: false, until: null }
+  );
+});
+
+test('holdForBudget: at the day cap the hold is the day', () => {
+  assert.deepEqual(Scheduler.holdForBudget({ thisHour: 0, today: DAY_ALARM_AT }), {
+    hold: true,
+    until: 'day',
+  });
+  // Both spent: the day is the wider net and names the reason.
+  assert.deepEqual(Scheduler.holdForBudget({ thisHour: HOUR_ALARM_AT, today: DAY_ALARM_AT }), {
+    hold: true,
+    until: 'day',
+  });
+});
+
+test('holdForBudget: at the hour cap with day room the hold is the hour', () => {
+  assert.deepEqual(Scheduler.holdForBudget({ thisHour: HOUR_ALARM_AT, today: 0 }), {
+    hold: true,
+    until: 'hour',
+  });
+  assert.deepEqual(
+    Scheduler.holdForBudget({ thisHour: HOUR_ALARM_AT, today: DAY_ALARM_AT - 1 }),
+    { hold: true, until: 'hour' }
+  );
+});
+
+test('holdForBudget: manual relists in the shared log hold the schedule too', () => {
+  // Both counts come from the one relistLog: a morning of hand relisting
+  // reads exactly like a morning of scheduled ones, and the gate holds.
+  assert.deepEqual(Scheduler.holdForBudget({ thisHour: 1, today: DAY_ALARM_AT }), {
+    hold: true,
+    until: 'day',
+  });
+  assert.deepEqual(Scheduler.holdForBudget({ thisHour: HOUR_ALARM_AT, today: 2 }), {
+    hold: true,
+    until: 'hour',
+  });
+});

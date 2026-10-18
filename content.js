@@ -2719,6 +2719,12 @@
     }
   }
 
+  // The walk's own memory: every payload the ladder's paging has seen, keyed
+  // by id. enumeratedIds answers in ids — that is all "Relist all" wants —
+  // but the schedule feed reads each item's age off these same payloads, and
+  // it must not make a second walk to get them.
+  const ladderItems = new Map();
+
   // One rung, paged: page one onwards until the empty page that ends the
   // walk, the ids isCopyable accepts collected in order. null out means the
   // rung did not answer and the next one is tried.
@@ -2733,6 +2739,9 @@
       }
       if (!Array.isArray(items)) return null;
       if (!items.length) return found; // the empty page that ends the walk
+      for (const item of items) {
+        if (item && item.id != null) ladderItems.set(String(item.id), item);
+      }
       for (const id of BulkQueue.filterEditable(items, isCopyable)) {
         found.push(String(id));
       }
@@ -2769,6 +2778,42 @@
     // and the seller is told it is only what is on screen.
     toast(T('bulk.fallback'), 'bad');
     return idsOnScreen();
+  }
+
+  // The schedule's feed: the one item a scheduled firing may relist next, or
+  // null when the wardrobe has nothing it may touch. The candidates are the
+  // ladder's own walk — enumeratedIds, live, in the order "Relist all"
+  // takes, keeping only what isCopyable accepts (BulkQueue.filterEditable)
+  // and dropping closed items on the way. The age hung off each is the age
+  // labels' own field: ageDays, the wardrobe index's copy of ageOf's answer
+  // — the oldest photo's high_resolution.timestamp, Vinted's only age for a
+  // listing and the source paintAgeLabels words — falling back to ageOf over
+  // the walk's own payloads (ladderItems) for items the index has not
+  // reached, which is every page the users/items rung answers. An id with no
+  // age to judge waits for a later firing rather than guessing one.
+  //
+  // Scope is the bulk bar's selection (string ids), and the ids this run has
+  // already relisted come back off the books as state.doneIds, so one period
+  // touches each item once. What survives all that is Scheduler.pickNext's
+  // one question. The run's status is the engine's, not this feed's: it
+  // answers 'which item', never 'may I fire'.
+  async function nextEligibleItem() {
+    const { state, defn } = await askWorker({ type: 'vintimated:schedule.status' });
+    if (!state || !defn) return null;
+
+    const items = [];
+    for (const id of await enumeratedIds()) {
+      const days = ageDays.get(id) ?? ageOf(ladderItems.get(id));
+      if (days == null) continue;
+      items.push({ id, ageDays: days, closed: false });
+    }
+
+    // Under 'selected' the run is confined to the ids the seller ticked in
+    // the bulk bar; under 'all' the selection is never consulted.
+    const scope = new Set(defn.scope === 'selected' ? selection.keys() : []);
+    const chosen = Scheduler.pickNext(items, defn, scope, new Set(state.doneIds));
+    if (chosen == null) return null;
+    return { id: chosen, ageDays: items.find(item => item.id === chosen).ageDays };
   }
 
   // The one question before a walk starts, and the only one — asked through
