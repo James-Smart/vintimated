@@ -125,7 +125,13 @@ const VintimatedText = (() => {
       'schedule.form.day.fri': 'Fri',
       'schedule.form.day.sat': 'Sat',
       'schedule.form.day.sun': 'Sun',
+      // What the form refuses to send, said beside the field at fault. A
+      // window that never opens or a week with nothing on it can only ever
+      // wait, and a schedule that waits forever without saying why is worse
+      // than no schedule.
+      'schedule.form.daysRequired': 'Turn at least one day on.',
       'schedule.form.hours': 'Hours',
+      'schedule.form.hoursOrder': 'The end time must be later than the start time.',
       'schedule.form.maxPerDay': 'Max relists per day:',
       'schedule.form.group.pace': 'Pace',
       'schedule.form.gap': 'Gap between relists:',

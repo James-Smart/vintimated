@@ -832,6 +832,18 @@ body {
   font-weight: 400;
 }
 
+/* What the form refuses to send, said under the field it belongs to and in
+   the destructive ink: the answer is not a value but a correction. Hidden
+   until Start finds the form impossible, and taken away by the next press
+   that finds it sound. */
+.field__error {
+  margin: 4px 0 0;
+  color: var(--destructive);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.4285;
+}
+
 /* Same tokens as .switch__select, so every control in the panel is one
    look — the panel's own border and background, not a browser-default box. */
 .field__input {

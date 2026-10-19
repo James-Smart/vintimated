@@ -1011,6 +1011,23 @@ function readScheduleForm() {
   };
 }
 
+// What the form can promise that the schedule model cannot keep. The window
+// is same-day — fromMin strictly before toMin, the half-open span
+// Scheduler.isWithinWindow reads — and at least one day has to be on, or
+// decide() answers 'outside-window' at every wake of a run that never fires.
+// Both are said where they are wrong rather than in a dialog: the hint under
+// the field at fault, the form left editable, and every Start press asking
+// again so a correction takes its own hint away. A refused form sends
+// nothing at all. Overnight windows are out of the model by design, not by
+// oversight — there is nothing here to wrap around.
+function showScheduleProblems(defn) {
+  const closed = defn.fromMin >= defn.toMin;
+  const noDays = defn.days.length === 0;
+  document.getElementById('sched-hours-error').hidden = !closed;
+  document.getElementById('sched-days-error').hidden = !noDays;
+  return !closed && !noDays;
+}
+
 // The form, written back from a run's definition. A schedule that is running
 // — or one that ended, or was cancelled, all of which keep their settings —
 // comes back up with every knob where it was left, so Start means "again, as
@@ -1089,7 +1106,11 @@ function wireSchedule() {
   };
 
   start.addEventListener('click', async () => {
-    const answer = await askSchedule({ type: 'vintimated:schedule.start', defn: readScheduleForm() });
+    const defn = readScheduleForm();
+    // A configuration that could only ever wait is refused here rather than
+    // sent: the message would start a run the seller could not see fail.
+    if (!showScheduleProblems(defn)) return;
+    const answer = await askSchedule({ type: 'vintimated:schedule.start', defn });
     if (!answer) return;
     current = answer.state;
     if (answer.defn) fillScheduleForm(answer.defn);

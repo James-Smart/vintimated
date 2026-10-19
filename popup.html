@@ -175,6 +175,7 @@
         <label class="day"><input type="checkbox" id="sched-day-6" checked><span data-i18n="schedule.form.day.sat">Sat</span></label>
         <label class="day"><input type="checkbox" id="sched-day-0" checked><span data-i18n="schedule.form.day.sun">Sun</span></label>
       </div>
+      <p class="field__error" id="sched-days-error" data-i18n="schedule.form.daysRequired" hidden>Turn at least one day on.</p>
 
       <div class="field">
         <label class="field__label" for="sched-from" id="sched-hours-label" data-i18n="schedule.form.hours">Hours</label>
@@ -184,6 +185,7 @@
           <input class="field__input" type="time" id="sched-to" value="21:00" aria-labelledby="sched-hours-label">
         </span>
       </div>
+      <p class="field__error" id="sched-hours-error" data-i18n="schedule.form.hoursOrder" hidden>The end time must be later than the start time.</p>
       <div class="field">
         <label class="field__label" for="sched-max" data-i18n="schedule.form.maxPerDay">Max relists per day:</label>
         <input class="field__input" type="number" id="sched-max" min="1" value="6">
