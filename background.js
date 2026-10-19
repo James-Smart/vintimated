@@ -355,8 +355,8 @@ const WAKE_ALARM = 'vintimated:schedule-wake';
 // engine's word that a runRelist is in flight in a named tab ({ tabId, at }) —
 // the one thing this worker cannot see for itself, and what a polite Stop
 // waits behind. 'pendingEnd' is this worker's own note that an ending is
-// parked behind such a relist ('stop'), honoured by the engine the moment its
-// relist settles.
+// parked behind such a relist ({ verb, startedAt }), honoured by the engine
+// the moment its relist settles — and only by the run the startedAt names.
 const SCHEDULE_WORKING_KEY = 'vintimated:schedule.working';
 const SCHEDULE_PENDING_KEY = 'vintimated:schedule.pendingEnd';
 
@@ -435,13 +435,17 @@ ext.alarms.onAlarm.addListener(alarm => {
 // OPENED is closed (closeEngineTab below); an adopted tab is the seller's own
 // and only stops being the engine.
 
-// On the wardrobe when on a Vinted member page — exactly the pages the
-// content script is injected into, where currentMemberId() and the
-// enumeration ladder keep their footing.
-function onWardrobe(url) {
-  if (!onVinted(url)) return false;
+// On the wardrobe only when on the seller's OWN member page — the remembered
+// profile's exact address, the same one popup.js and content.js record. A
+// foreign member page has the same URL shape and must not pass: the ladder's
+// footing is the member the URL names, and on somebody else's page that is
+// somebody else's wardrobe. Comparing the whole address (origin and path) also
+// keeps a same-numbered member on another country domain out.
+function onWardrobe(url, home) {
+  if (!onVinted(url) || !home) return false;
   try {
-    return new URL(url).pathname.startsWith('/member/');
+    const at = new URL(url);
+    return `${at.origin}${at.pathname}` === home;
   } catch (_) {
     return false;
   }
@@ -462,18 +466,23 @@ async function ensureEngineTab() {
       tab = await ext.tabs.get(lease.tabId).catch(() => null);
     }
     if (tab) {
-      // Pinned to the wardrobe: a wake that finds the engine somewhere else
-      // navigates it back to the remembered profile.
-      if (home && !onWardrobe(tab.url)) {
+      // Pinned to the wardrobe: a wake that finds the engine anywhere but
+      // home navigates it back to the remembered profile.
+      if (home && !onWardrobe(tab.url, home)) {
         tab = (await ext.tabs.update(tab.id, { url: home })) || tab;
       }
       return tab;
     }
 
-    // No engine to keep: adopt a wardrobe tab already open — the run lives
-    // there — or open the remembered profile to be one. Quietly: the tab is
-    // the scheduler's engine room, not something the seller asked to see.
-    const [adopted] = await ext.tabs.query({ url: WARDROBE_URL_PATTERNS });
+    // No engine to keep: adopt the seller's OWN wardrobe tab when one is open
+    // — a foreign member page is nobody's engine room, and the first tab in
+    // the browser is as likely to be one as not — or open the remembered
+    // profile to be one. Quietly: the tab is the scheduler's engine room, not
+    // something the seller asked to see. With no remembered profile there is
+    // nothing to verify and nothing to open, so no tab is named and the run
+    // waits until the seller's own wardrobe has been seen once.
+    const candidates = await ext.tabs.query({ url: WARDROBE_URL_PATTERNS });
+    const adopted = candidates.find(candidate => onWardrobe(candidate.url, home)) || null;
     const opened = !adopted && home ? await ext.tabs.create({ url: home, active: false }) : null;
     tab = adopted || opened;
     if (tab && tab.id != null) {
@@ -539,12 +548,16 @@ async function scheduleWorking() {
   }
 }
 
-// The parked ending: written when a Stop waits behind a relist, cleared by
-// whatever ends the run — the engine coming back with the Stop it was
-// promised, or an Abort that cancels the wait outright.
-async function markPendingEnd(verb) {
+// The parked ending: written when a Stop waits behind a relist, and stamped
+// with the run's startedAt so it is an ending for THAT run and no other. A
+// Start that lands before it settles draws a new run and takes the markers
+// with it; the stamp is what keeps a marker that slips through anyway from
+// stopping the brand-new run over a relist the old one was still finishing.
+// Cleared by whatever ends the run — the engine coming back with the Stop it
+// was promised, or an Abort that cancels the wait outright.
+async function markPendingEnd(verb, startedAt) {
   try {
-    if (verb) await ext.storage.local.set({ [SCHEDULE_PENDING_KEY]: verb });
+    if (verb) await ext.storage.local.set({ [SCHEDULE_PENDING_KEY]: { verb, startedAt } });
     else await ext.storage.local.remove(SCHEDULE_PENDING_KEY);
   } catch (err) {
     console.debug('[Vintimated] could not note the schedule ending', err);
@@ -596,11 +609,14 @@ async function scheduleStatus(sender) {
 // A start is the form's defn turned into a run: the state machine draws the
 // period from now, and the alarm and the engine tab follow the books. A start
 // that lands on a running schedule begins the clean run transition defines —
-// one alarm, one tab, never two of either.
+// one alarm, one tab, never two of either. The engine markers go with the run
+// that has just been replaced: a Stop parked behind ITS relist is an ending
+// for it, and a relist still settling from it must not stop this one.
 async function scheduleStart(defn, sender) {
   // A message that carries no definition is not a start: the caller gets the
   // books back and no run is invented out of a malformed message.
   if (!defn || typeof defn !== 'object' || Array.isArray(defn)) return scheduleStatus(sender);
+  await clearEngineMarkers();
   const state = Scheduler.transition(await readSchedule(), {
     type: 'start',
     defn,
@@ -614,21 +630,24 @@ async function scheduleStart(defn, sender) {
 
 // Stop and abort are different in kind, not only in what they wipe. Stop is
 // polite — "the schedule ends after the relist in progress" — so a relist in
-// hand is let finish: the ending is parked behind it (pendingEnd) and comes
-// back through this same door the moment the engine settles it, the books
-// going on saying 'running' until then because that is what is true. Abort is
-// hard and cancels at once — "finishes nothing new" — with the copy-before-
-// delete and pending recovery already protecting whatever was mid-flight.
+// hand is let finish: the ending is parked behind it (pendingEnd, stamped
+// with this run's startedAt) and comes back through this same door the moment
+// the engine settles it, the books going on saying 'running' until then
+// because that is what is true. Abort is hard and cancels at once — "finishes
+// nothing new" — with the copy-before-delete and pending recovery already
+// protecting whatever was mid-flight.
 // Either way the engine tab goes: the tab that held the floor held it for a
 // run that is over (the period running out reaches this same door, the engine
 // asking for the stop on its own). A stop or abort that finds no definition to
 // act on writes nothing at all, so the books only ever hold a state
-// deserialize would believe.
+// deserialize would believe. A marker that cannot say which run it is parked
+// for is never parked: with no startedAt to stamp there is nothing a later
+// check could honour, so the run ends here instead.
 async function scheduleEnd(verb, sender) {
   let state = await readSchedule();
 
-  if (verb === 'stop' && state.defn != null && (await scheduleWorking())) {
-    await markPendingEnd('stop');
+  if (verb === 'stop' && state.defn != null && state.startedAt != null && (await scheduleWorking())) {
+    await markPendingEnd('stop', state.startedAt);
     return scheduleAnswer(state, sender);
   }
 

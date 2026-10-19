@@ -2837,11 +2837,14 @@
   // reached, which is every page the users/items rung answers. An id with no
   // age to judge waits for a later firing rather than guessing one.
   //
-  // Scope is the bulk bar's selection (string ids), and the ids this run has
+  // Scope is the definition's own captured list — defn.selectedIds, the ids
+  // the seller ticked when they pressed Start — and the ids this run has
   // already relisted come back off the books as state.doneIds, so one period
-  // touches each item once. What survives all that is Scheduler.pickNext's
-  // one question. The run's status is the engine's, not this feed's: it
-  // answers 'which item', never 'may I fire'.
+  // touches each item once. Not the bulk bar's live Map: that dies with the
+  // page, and this page reloads all week, while the definition travels in the
+  // books untouched. What survives all that is Scheduler.pickNext's one
+  // question. The run's status is the engine's, not this feed's: it answers
+  // 'which item', never 'may I fire'.
   async function nextEligibleItem() {
     const { state, defn } = await askWorker({ type: 'vintimated:schedule.status' });
     if (!state || !defn) return null;
@@ -2853,9 +2856,10 @@
       items.push({ id, ageDays: days, closed: false });
     }
 
-    // Under 'selected' the run is confined to the ids the seller ticked in
-    // the bulk bar; under 'all' the selection is never consulted.
-    const scope = new Set(defn.scope === 'selected' ? selection.keys() : []);
+    // Under 'selected' the run is confined to the ids captured at Start; the
+    // checkboxes are not consulted at all. Under 'all' the scope is never
+    // consulted either.
+    const scope = Scheduler.scopeSelection(defn);
     const chosen = Scheduler.pickNext(items, defn, scope, new Set(state.doneIds));
     if (chosen == null) return null;
     return { id: chosen, ageDays: items.find(item => item.id === chosen).ageDays };
@@ -3310,9 +3314,10 @@
   // works for exactly one run — the one the books named when it woke — and a
   // start that lands under it is another run entirely, whatever either set of
   // books says. Not merely 'running': a new run is running too, and its books
-  // are not this wake's to write a fire event into.
-  const sameRun = (a, b) =>
-    Boolean(a && b && a.startedAt != null && a.startedAt === b.startedAt);
+  // are not this wake's to write a fire event into. The arithmetic is
+  // Scheduler's own, so the engine and the parked ending check it the same
+  // way.
+  const sameRun = Scheduler.sameRun;
 
   // One knock's worth of work — or one page load's; both ask the same
   // question at different moments. At most one relist comes out of it,
@@ -3323,6 +3328,18 @@
     try {
       // Off means off here as everywhere else: nothing is sent to Vinted.
       if (enabled !== true) return;
+
+      // The ladder's footing: the run only ever works the seller's own
+      // wardrobe — the remembered profile's exact address. A foreign member
+      // page has the same URL shape and would make rung one walk THEIR items,
+      // so the engine stands down wherever it is not home. The worker keeps
+      // the engine tab on home already; this is the same rule where the work
+      // happens, and the last word on it.
+      const home = await readSetting(LAST_PROFILE_KEY, null);
+      if (!home || `${SITE}${location.pathname}` !== home) {
+        trace('schedule: not the seller\'s own wardrobe; standing down');
+        return;
+      }
 
       // A walk or a relist already in hand is this tab's own work; the
       // schedule waits its turn rather than doubling the traffic.
@@ -3338,8 +3355,11 @@
 
       // A Stop parked behind a relist that has since gone away is honoured
       // here, before anything is asked about firing: the end goes through the
-      // worker's door, and no relist starts over it.
-      if ((await readSetting(SCHEDULE_PENDING_KEY, null)) != null) {
+      // worker's door, and no relist starts over it. Only a Stop parked for
+      // THIS run counts — one parked before a Start that replaced it was for
+      // another run entirely, and must not end this one.
+      const pending = await readSetting(SCHEDULE_PENDING_KEY, null);
+      if (Scheduler.pendingEndVerb(pending, state)) {
         await askWorker({ type: 'vintimated:schedule.stop' });
         return;
       }
@@ -3351,12 +3371,22 @@
       }
 
       // The shared relist log is the day's true count: a manual relist has
-      // exactly the weight of a scheduled one in the cap decide reads.
+      // exactly the weight of a scheduled one in the cap decide reads — and
+      // the day is the form's day, the calendar day since local midnight, not
+      // a rolling twenty-four hours that keeps yesterday evening in today's
+      // tally.
       const log = await relistLog();
+      // The stand-down is fed in as the pause it is: while the block record
+      // says Vinted said stop, decide() answers 'paused' and the engine
+      // probes nothing at all. An enumeration GET made during a stand-down
+      // would run its refusal through noteRefusal and escalate the very
+      // stand-down it walked into — the schedule goes completely silent with
+      // the block.
+      const block = await readBlock();
       const decision = Scheduler.decide(defn, Date.now(), {
         lastFireAt: state.lastFireAt,
-        todayCount: countWithin(log, DAY_WINDOW_MS),
-        pausedUntil: state.pausedUntil,
+        todayCount: Scheduler.sinceDayStart(log, Date.now()),
+        pausedUntil: block ? block.until : state.pausedUntil,
         nextDueAt: state.nextDueAt,
       });
       if (decision.action !== 'fire') {
@@ -3373,11 +3403,13 @@
 
       // --- the budget pre-check, and the only gate between the decision and
       // the relist. The counts come off the one shared relistLog — a manual
-      // relist counts exactly like a scheduled one — and a hold is silent: no
-      // dialog, nothing recorded, and the next wake simply re-decides.
+      // relist counts exactly like a scheduled one — thisHour over its
+      // rolling hour, today over the calendar day the form promises. A hold
+      // is silent: no dialog, nothing recorded, and the next wake simply
+      // re-decides.
       const counts = {
         thisHour: countWithin(await relistLog(), HOUR_WINDOW_MS),
-        today: countWithin(await relistLog(), DAY_WINDOW_MS),
+        today: Scheduler.sinceDayStart(await relistLog(), Date.now()),
       };
       const hold = Scheduler.holdForBudget(counts);
       if (hold.hold) {
@@ -3486,8 +3518,11 @@
       // fire is on the books when there is one, so "ends after the relist in
       // progress" keeps the very relist it waited for. The end goes through
       // the worker's door: it ends the books, drops the lease and closes the
-      // engine tab per their own rules.
-      if ((await readSetting(SCHEDULE_PENDING_KEY, null)) != null) {
+      // engine tab per their own rules. And it is still only a Stop parked
+      // for this run: one parked before a Start that landed mid-relist was
+      // for the run that Start replaced, and nothing here ends over it.
+      const parkedEnd = await readSetting(SCHEDULE_PENDING_KEY, null);
+      if (Scheduler.pendingEndVerb(parkedEnd, state)) {
         await askWorker({ type: 'vintimated:schedule.stop' });
       }
     } catch (err) {
@@ -3516,10 +3551,13 @@
   // that is where the seller already looks to see this wardrobe being worked,
   // and it stands alone there when the page has nothing to bulk-relist.
   //
-  // The countdown is nextDueAt — the gap the run itself is holding — and a
-  // stand-down from Vinted takes its place, read the way the buttons' own
-  // greying reads it: the block record the pause machinery writes, not a
-  // second opinion of this file's own.
+  // The countdown is the next moment a relist could really happen — the gap
+  // the run holds, the window it works in and the day's cap all consulted
+  // (Scheduler.nextOpportunity), so a night outside the hours never reads
+  // "~1 min". While the shop is shut the strip says so and names the next
+  // window instead. And a stand-down from Vinted takes the countdown's place,
+  // read the way the buttons' own greying reads it: the block record the
+  // pause machinery writes, not a second opinion of this file's own.
 
   // Abort's two clicks, the same bargain the popup's button strikes: the
   // first only turns the label into the question and the second answers it.
@@ -3552,6 +3590,15 @@
     });
   }
 
+  // The next window's moment, named the way the strip names a clock — with
+  // its date along when it is not today's, so "next window 18:00" can never
+  // mean a day the seller is not thinking of.
+  function windowOf(at, now) {
+    return Scheduler.dayKey(at) === Scheduler.dayKey(now)
+      ? clockOf(at)
+      : `${dayOf(at)} ${clockOf(at)}`;
+  }
+
   // The one place the strip's words are written. Called when something might
   // have changed them — a knock, a firing, a manual relist, a pause landing
   // or lifting, the run ending — and never from the mutation observer: each
@@ -3574,22 +3621,35 @@
       }
       scheduleState = state;
 
-      const parts = [T('schedule.strip.running')];
-      const block = await readBlock();
-      if (block && block.until > Date.now()) {
-        parts.push(T('schedule.strip.paused', clockOf(block.until)));
-      } else if (state.nextDueAt != null) {
-        const mins = Math.max(1, Math.round((state.nextDueAt - Date.now()) / 60000));
-        parts.push(T('schedule.strip.next', mins));
-      }
       // The day's count is the shared relist log's, not the run's own
       // dayCount: a manual relist spends exactly the same cap, and what the
-      // form promised was the account's day, not the schedule's bookkeeping.
-      parts.push(T(
-        'schedule.strip.count',
-        countWithin(await relistLog(), DAY_WINDOW_MS),
-        defn.maxPerDay,
-      ));
+      // form promised was the account's day — the calendar day, since local
+      // midnight — not the schedule's bookkeeping or a rolling window.
+      const today = Scheduler.sinceDayStart(await relistLog(), Date.now());
+
+      const parts = [T('schedule.strip.running')];
+      const now = Date.now();
+      const block = await readBlock();
+      if (block && block.until > now) {
+        parts.push(T('schedule.strip.paused', clockOf(block.until)));
+      } else {
+        const at = Scheduler.nextOpportunity(defn, now, {
+          nextDueAt: state.nextDueAt,
+          todayCount: today,
+        });
+        if (at != null && !Scheduler.isWithinWindow(defn, now)) {
+          // The shop is shut: a countdown would name a relist that cannot
+          // happen. Say so, and name the next opening instead — the only
+          // promise the window allows.
+          parts.push(T('schedule.strip.outside', windowOf(at, now)));
+        } else if (at != null) {
+          const mins = Math.max(1, Math.round((at - now) / 60000));
+          parts.push(T('schedule.strip.next', mins));
+        }
+        // A period that is over promises nothing at all: the engine ends the
+        // run at its next wake, and the strip goes with it.
+      }
+      parts.push(T('schedule.strip.count', today, defn.maxPerDay));
       // state.endsAt is the period transition drew from periodMs; defn.endsAt
       // is the same moment decide() checks the clock against. Either is the
       // date the seller was promised.
@@ -3663,12 +3723,16 @@
 
   // The URL of somebody else's wardrobe looks exactly like the URL of your own,
   // so the popup cannot tell them apart and must not try. It asks the page
-  // instead, and the page answers with what it actually put on screen.
+  // instead, and the page answers with what it actually put on screen — and,
+  // for a schedule's scope, the ids its checkboxes carry right now. The popup
+  // captures them at Start and they travel in the definition from then on:
+  // this Map dies with the page, and the engine tab reloads all week.
   ext.runtime.onMessage.addListener((message, _sender, respond) => {
     if (!message || message.type !== 'vintimated:pageState') return false;
     respond({
       profileUrl: `${SITE}${location.pathname}`,
       relistable: document.querySelectorAll(SELECTOR.ourItem).length,
+      selectedIds: [...selection.keys()],
     });
     return false; // answered on the spot
   });

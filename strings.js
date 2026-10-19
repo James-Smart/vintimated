@@ -142,14 +142,22 @@ const VintimatedText = (() => {
       'schedule.form.ageSuffix': '+ days ago',
       'schedule.form.scope.all': 'All my active items',
       'schedule.form.scope.selected': 'Only what I ticked in the wardrobe',
+      // The third refusal, said beside the scope it is about: a run that may
+      // touch no item at all is a promise nothing can keep, and the ticks it
+      // needs are on the wardrobe page, not in the popup.
+      'schedule.form.selectionRequired': 'Tick at least one item in the wardrobe first.',
       'schedule.form.start': 'Start schedule',
       'schedule.stop': 'Stop',
       'schedule.abort': 'Abort',
       'schedule.abort.confirm': 'Confirm abort',
       // The strip's line, joined with " · ": running · countdown · count · ends.
-      // A stand-down from Vinted takes the countdown's place.
+      // A stand-down from Vinted takes the countdown's place, and so does a
+      // shop that is shut: the countdown is the next relist's real moment, and
+      // where none can happen it names the next window instead of promising
+      // one.
       'schedule.strip.running': 'Schedule running',
       'schedule.strip.next': 'next relist in ~{0} min',
+      'schedule.strip.outside': 'outside hours · next window {0}',
       'schedule.strip.count': '{0} of {1} today',
       'schedule.strip.ends': 'ends {0}',
       'schedule.strip.paused': 'paused until {0}',

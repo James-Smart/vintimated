@@ -30,10 +30,12 @@ distributed under the same license.
 - **Schedule mode.** The popup's *Schedule* panel is one form with every knob
   on it: *Period* (starts when you press Start, ends a week later by default),
   *Days* (all seven on), *Hours* (18:00–21:00 — one same-day window; the form
-  refuses an overnight or an empty one), *Max relists per day* (6), *Gap
-  between relists* (35–90 minutes, drawn at random each time), *Only items
+  refuses an overnight or an empty one), *Max relists per day* (6 — the
+  calendar day, since midnight, and manual relists count against it too),
+  *Gap between relists* (35–90 minutes, drawn at random each time), *Only items
   listed N+ days ago* (10) and the scope — all your active items, or only what
-  you ticked in the wardrobe. The age threshold doubles as the cadence: a
+  you ticked in the wardrobe, the ticks captured when you press Start so a
+  reloaded page cannot lose them. The age threshold doubles as the cadence: a
   relist makes a listing brand new again, so the same item cannot come back
   round inside it. The run keeps its own quiet wardrobe tab as its engine —
   one it opened is its own to close and harmless to close by hand — driven by
@@ -53,7 +55,9 @@ distributed under the same license.
   with copy-before-delete and the recovery banner still covering whatever was
   mid-flight. While a run is live the wardrobe bar carries
   `Schedule running · next relist in ~N min · k of cap today · ends <date>`,
-  or `paused until <time>` while the stand-down Vinted asked for stands. The
+  `paused until <time>` while the stand-down Vinted asked for stands, or
+  `outside hours · next window <time>` when the shop is shut — the countdown
+  is always the next relist's real moment. The
   schedule inherits the whole safety story — copy before delete, retried
   publishing, photo refresh, the pacing defaults — and comes back inside its
   own windows when the stand-down lifts.

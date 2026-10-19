@@ -20,8 +20,12 @@
 // arithmetic behind that promise and nothing else. No alarms, no tabs, no
 // storage: the window and its edges, the gap's bounds, the day's cap, the one
 // decision a single moment can earn (decide), and the small state machine
-// (transition) that remembers where a run has got to. The callers bring the
-// timers and the clicks.
+// (transition) that remembers where a run has got to. Three small honesties
+// live here too, because the glue around them cannot be trusted to invent
+// them: the calendar day's count (sinceDayStart), the first moment a relist
+// could really happen (nextOpportunity), and the run identity a parked ending
+// is honoured under (sameRun, pendingEndVerb). The callers bring the timers
+// and the clicks.
 //
 // Time arrives as plain milliseconds since the epoch and leaves the same way,
 // so the tests can walk a week in a sentence; only dayKey and the window
@@ -74,6 +78,19 @@ const Scheduler = (() => {
   // repay: the answer bottoms out at zero.
   function capacityLeft(defn, todayCount) {
     return Math.max(0, defn.maxPerDay - todayCount);
+  }
+
+  // How many fires the local day has spent: the log's timestamps at or after
+  // the day's own midnight. A rolling window is not the day the form promises
+  // — yesterday evening's relists sit in one until they age out, and
+  // consecutive days under-deliver the cap — so the day is the calendar
+  // day's, and only this function knows where it starts. A stamp from the
+  // future (a clock that moved) is counted, not dropped: a count too high
+  // only ever holds a firing back.
+  function sinceDayStart(timestamps, now) {
+    const day = new Date(now);
+    const midnight = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+    return timestamps.filter(at => typeof at === 'number' && at >= midnight).length;
   }
 
   // The manual volume alarms, the same pair content.js and popup.js carry:
@@ -153,6 +170,31 @@ const Scheduler = (() => {
     return { action: 'fire', reason: 'fire', waitMs: 0 };
   }
 
+  // The strip's honest answer to "when next?": the first moment at or after
+  // `now` a relist could actually happen — the gap must have come round, the
+  // shop must be open, and a day whose cap is spent waits for the next day's
+  // opening exactly as decide() says it must. The same primitives decide()
+  // consults do the arithmetic (isWithinWindow, windowStartAfter,
+  // capacityLeft), so the countdown can never name a moment the gates would
+  // refuse; a gap that overshoots the closing is pushed to the next opening,
+  // not shown at the moment it names. null when there is nothing left to
+  // promise: the period is over, or every wait left would end after it.
+  function nextOpportunity(defn, now, ctx) {
+    if (now >= defn.endsAt) return null;
+    let at = now;
+    if (ctx && ctx.pausedUntil != null && ctx.pausedUntil > at) at = ctx.pausedUntil;
+    if (ctx && ctx.nextDueAt != null && ctx.nextDueAt > at) at = ctx.nextDueAt;
+    if (capacityLeft(defn, (ctx && ctx.todayCount) || 0) <= 0) {
+      const opening = nextDayWindowStart(defn, now);
+      if (opening > at) at = opening;
+    }
+    // `at` outside the window names a moment the shop is shut — strictly
+    // after it, because a moment outside the window is never itself the
+    // opening.
+    const due = isWithinWindow(defn, at) ? at : windowStartAfter(defn, new Date(at), at);
+    return due < defn.endsAt ? due : null;
+  }
+
   // Which items a run may touch: old enough to be worth the relist and still
   // open on the seller's side — a closed listing has nothing to refresh.
   function eligible(defn) {
@@ -163,6 +205,20 @@ const Scheduler = (() => {
   // seller picked out.
   function inScope(defn, itemId, selection) {
     return defn.scope === 'all' ? true : selection.has(itemId);
+  }
+
+  // The Set inScope takes, built from the definition's own captured list. The
+  // seller's ticks are gathered once, at Start, and travel in
+  // defn.selectedIds for the whole period: the wardrobe's live checkboxes are
+  // wiped by any reload and the engine tab reloads all week, while the
+  // definition does not. Under 'all' the list is never consulted; a scope of
+  // 'selected' with no list is an empty scope and stays empty — the form
+  // refuses that at Start, and the ids are strings end to end.
+  function scopeSelection(defn) {
+    const ids = defn && defn.scope === 'selected' && Array.isArray(defn.selectedIds)
+      ? defn.selectedIds
+      : [];
+    return new Set(ids.map(String));
   }
 
   // The feed's one question: which id does the run relist next? The first
@@ -197,6 +253,29 @@ const Scheduler = (() => {
 
   function renewLease(now, tabId) {
     return { tabId, until: now + LEASE_MS };
+  }
+
+  // Run identity: the period a start drew, named by its startedAt. A wake
+  // works for exactly one run — the one the books named when it woke — and a
+  // start that lands under it is another run entirely, whatever either set of
+  // books says. Not merely 'running': a new run is running too, and its books
+  // are not the old one's to write into or to end.
+  function sameRun(a, b) {
+    return Boolean(a && b && a.startedAt != null && a.startedAt === b.startedAt);
+  }
+
+  // A parked ending is an ending for the run it was parked for and no other.
+  // The marker is { verb, startedAt } — the verb to honour and the run it was
+  // parked behind — and it answers only when that startedAt still names the
+  // run on the books. A Stop parked behind a relist in flight and a Start
+  // that lands before it settles would else stop the brand-new run over a
+  // relist the old one was still finishing. A marker with no run to its name
+  // — the bare verb older versions parked, anything malformed — is honoured
+  // by nobody.
+  function pendingEndVerb(pending, state) {
+    if (!pending || typeof pending !== 'object' || Array.isArray(pending)) return null;
+    if (pending.verb !== 'stop' && pending.verb !== 'abort') return null;
+    return sameRun(pending, state) ? pending.verb : null;
   }
 
   // The books of a run: what it is running, until when, when it last fired,
@@ -303,11 +382,16 @@ const Scheduler = (() => {
     isWithinWindow,
     nextGapMs,
     capacityLeft,
+    sinceDayStart,
     holdForBudget,
     decide,
+    nextOpportunity,
     eligible,
     inScope,
+    scopeSelection,
     pickNext,
+    sameRun,
+    pendingEndVerb,
     transition,
     dayKey,
     leaseValid,

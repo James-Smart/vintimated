@@ -986,7 +986,9 @@ const SCHEDULE_DAYS = [0, 1, 2, 3, 4, 5, 6];
 // not the same fact twice: defn.endsAt is the moment decide() checks the
 // clock against, while defn.periodMs is what transition() draws the run's own
 // endsAt from. A gap entered upside down is read the right way up rather than
-// left to draw negative waits.
+// left to draw negative waits. The one field no control carries is
+// selectedIds — the wardrobe's ticks, gathered at Start and only ever present
+// under scope 'selected'.
 function readScheduleForm() {
   const number = (id, fallback) => {
     const parsed = parseInt(document.getElementById(id).value, 10);
@@ -1013,19 +1015,24 @@ function readScheduleForm() {
 
 // What the form can promise that the schedule model cannot keep. The window
 // is same-day — fromMin strictly before toMin, the half-open span
-// Scheduler.isWithinWindow reads — and at least one day has to be on, or
-// decide() answers 'outside-window' at every wake of a run that never fires.
-// Both are said where they are wrong rather than in a dialog: the hint under
-// the field at fault, the form left editable, and every Start press asking
-// again so a correction takes its own hint away. A refused form sends
-// nothing at all. Overnight windows are out of the model by design, not by
-// oversight — there is nothing here to wrap around.
+// Scheduler.isWithinWindow reads — at least one day has to be on, or
+// decide() answers 'outside-window' at every wake of a run that never fires,
+// and a scope of 'only what I ticked' needs ticks: a run that may touch no
+// item at all is the same promise nothing can keep. All three are said where
+// they are wrong rather than in a dialog: the hint under the field at fault,
+// the form left editable, and every Start press asking again so a correction
+// takes its own hint away. A refused form sends nothing at all. Overnight
+// windows are out of the model by design, not by oversight — there is nothing
+// here to wrap around.
 function showScheduleProblems(defn) {
   const closed = defn.fromMin >= defn.toMin;
   const noDays = defn.days.length === 0;
+  const noSelection = defn.scope === 'selected' &&
+    (!Array.isArray(defn.selectedIds) || defn.selectedIds.length === 0);
   document.getElementById('sched-hours-error').hidden = !closed;
   document.getElementById('sched-days-error').hidden = !noDays;
-  return !closed && !noDays;
+  document.getElementById('sched-scope-error').hidden = !noSelection;
+  return !closed && !noDays && !noSelection;
 }
 
 // The form, written back from a run's definition. A schedule that is running
@@ -1065,10 +1072,11 @@ function fillScheduleForm(defn) {
 
 // The panel, wired once. Start sends the whole definition and takes the books
 // back as its answer; Stop and Abort are answers to a run in being only. The
-// repaint handle is handed out because the one thing here the catalogue does
-// not draw — Abort's two-state label — has to be drawn again on a language
-// change.
-function wireSchedule() {
+// active tab rides along because a 'selected' scope is the wardrobe's ticks,
+// and only the page knows them. The repaint handle is handed out because the
+// one thing here the catalogue does not draw — Abort's two-state label — has
+// to be drawn again on a language change.
+function wireSchedule(tab) {
   const start = document.getElementById('sched-start');
   const stop = document.getElementById('sched-stop');
   const abort = document.getElementById('sched-abort');
@@ -1107,6 +1115,17 @@ function wireSchedule() {
 
   start.addEventListener('click', async () => {
     const defn = readScheduleForm();
+    // "Only what I ticked" is the ticks the wardrobe holds at this moment,
+    // and only the page knows them: the active tab is asked for its
+    // selection, and the ids travel in defn.selectedIds from here on. The
+    // live checkboxes die with the page — and the engine tab reloads all
+    // week — but the definition does not.
+    if (defn.scope === 'selected') {
+      const page = await askPage(tab);
+      defn.selectedIds = page && Array.isArray(page.selectedIds)
+        ? page.selectedIds.map(String)
+        : [];
+    }
     // A configuration that could only ever wait is refused here rather than
     // sent: the message would start a run the seller could not see fail.
     if (!showScheduleProblems(defn)) return;
@@ -1255,7 +1274,7 @@ async function main() {
   // from the top. paintTab covers the status card, the pending list and the
   // action button; the other two own a card each, and the schedule's buttons
   // are its own third.
-  const paintSchedule = wireSchedule();
+  const paintSchedule = wireSchedule(tab);
   const repaintAll = () => {
     paintTab();
     renderPause(stored);

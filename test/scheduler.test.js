@@ -493,3 +493,176 @@ test('holdForBudget: manual relists in the shared log hold the schedule too', ()
     until: 'hour',
   });
 });
+
+// --- the calendar day's count ---------------------------------------------
+
+test('sinceDayStart: the count is the local day\'s, not a rolling window', () => {
+  // Three fires yesterday evening, two this morning, one just now. A rolling
+  // twenty-four hours would count all six; the day the form promises counts
+  // three.
+  const log = [
+    ts(-1, 21, 0), ts(-1, 22, 30), ts(-1, 23, 59),
+    ts(0, 0, 15), ts(0, 9, 0), ts(0, 18, 30),
+  ];
+  assert.equal(Scheduler.sinceDayStart(log, ts(0, 18, 40)), 3);
+  // Midnight belongs to the new day; the minute before it to the old one.
+  assert.equal(Scheduler.sinceDayStart([ts(0, 0, 0)], ts(0, 12, 0)), 1);
+  assert.equal(Scheduler.sinceDayStart([ts(-1, 23, 59)], ts(0, 12, 0)), 0);
+  assert.equal(Scheduler.sinceDayStart([], ts(0, 12, 0)), 0);
+});
+
+test('sinceDayStart: nothing that is not a timestamp is counted', () => {
+  assert.equal(Scheduler.sinceDayStart(['x', null, undefined, ts(0, 9, 0)], ts(0, 12, 0)), 1);
+});
+
+// --- the strip's next real opportunity ------------------------------------
+
+test('nextOpportunity: inside the window the gap is the wait', () => {
+  const d = defn({ days: [weekday(0), weekday(1)] });
+  assert.equal(
+    Scheduler.nextOpportunity(d, ts(0, 19, 0), ctx({ nextDueAt: ts(0, 19, 5) })),
+    ts(0, 19, 5),
+  );
+  // A gap that has come round means the firing is due now — and a wait is
+  // never zero-length in decide()'s sense, but the strip may say "~1 min".
+  assert.equal(
+    Scheduler.nextOpportunity(d, ts(0, 19, 0), ctx({ nextDueAt: ts(0, 18, 55) })),
+    ts(0, 19, 0),
+  );
+});
+
+test('nextOpportunity: a shop that is shut waits for its next opening', () => {
+  const d = defn({ days: [weekday(0), weekday(1)] });
+  // Morning: today's own opening. After closing: tomorrow's.
+  assert.equal(Scheduler.nextOpportunity(d, ts(0, 10, 0), ctx()), ts(0, 18, 0));
+  assert.equal(Scheduler.nextOpportunity(d, ts(0, 22, 0), ctx()), ts(1, 18, 0));
+  // A gap that overshoots the closing fires at the next opening, never at the
+  // moment the gap names — the countdown must not promise a relist the window
+  // would refuse.
+  assert.equal(
+    Scheduler.nextOpportunity(d, ts(0, 20, 0), ctx({ nextDueAt: ts(0, 21, 30) })),
+    ts(1, 18, 0),
+  );
+});
+
+test('nextOpportunity: a spent day\'s cap waits for the next day\'s opening', () => {
+  const d = defn({ days: [weekday(0), weekday(1)] });
+  // Inside the window with the cap spent: nothing today, tomorrow's opening.
+  assert.equal(
+    Scheduler.nextOpportunity(d, ts(0, 19, 0), ctx({ nextDueAt: ts(0, 19, 5), todayCount: 3 })),
+    ts(1, 18, 0),
+  );
+  // And the gap still counts afterwards: a draw beyond the next opening
+  // pushes past it rather than being rounded down to the opening.
+  assert.equal(
+    Scheduler.nextOpportunity(d, ts(0, 19, 0), ctx({ nextDueAt: ts(1, 19, 0), todayCount: 3 })),
+    ts(1, 19, 0),
+  );
+});
+
+test('nextOpportunity: a period that is over promises nothing', () => {
+  const d = defn({ endsAt: ts(0, 19, 30) });
+  assert.equal(Scheduler.nextOpportunity(d, ts(0, 19, 30), ctx({ nextDueAt: ts(0, 19, 35) })), null);
+  // ...and a wait that would only come round after the period has run out is
+  // no promise either.
+  assert.equal(
+    Scheduler.nextOpportunity(d, ts(0, 19, 0), ctx({ nextDueAt: ts(2, 19, 0) })),
+    null,
+  );
+});
+
+test('nextOpportunity: a pause in the context pushes the moment past it', () => {
+  const d = defn({ days: [weekday(0), weekday(1)] });
+  assert.equal(
+    Scheduler.nextOpportunity(d, ts(0, 19, 0), ctx({
+      nextDueAt: ts(0, 19, 1),
+      pausedUntil: ts(0, 19, 30),
+    })),
+    ts(0, 19, 30),
+  );
+});
+
+// --- run identity, and the parked ending ----------------------------------
+
+test('sameRun: the period a start drew is named by its startedAt', () => {
+  const run = { startedAt: ts(0, 18, 0) };
+  assert.equal(Scheduler.sameRun(run, { startedAt: ts(0, 18, 0) }), true);
+  assert.equal(Scheduler.sameRun(run, { startedAt: ts(0, 18, 1) }), false);
+  assert.equal(Scheduler.sameRun(run, { startedAt: null }), false);
+  assert.equal(Scheduler.sameRun({ startedAt: null }, { startedAt: null }), false);
+  assert.equal(Scheduler.sameRun(null, run), false);
+  assert.equal(Scheduler.sameRun(run, null), false);
+});
+
+test('pendingEndVerb: a parked ending is honoured only by its own run', () => {
+  const parked = { verb: 'stop', startedAt: ts(0, 18, 0) };
+  assert.equal(Scheduler.pendingEndVerb(parked, { startedAt: ts(0, 18, 0) }), 'stop');
+  assert.equal(
+    Scheduler.pendingEndVerb({ verb: 'abort', startedAt: ts(0, 18, 0) }, { startedAt: ts(0, 18, 0) }),
+    'abort',
+  );
+  // A Start that landed in between drew another run entirely, and the parked
+  // Stop is not for it.
+  assert.equal(Scheduler.pendingEndVerb(parked, { startedAt: ts(0, 19, 0) }), null);
+});
+
+test('pendingEndVerb: a marker with no run to its name is honoured by nobody', () => {
+  const run = { startedAt: ts(0, 18, 0) };
+  // The bare verb older versions parked: no startedAt to check.
+  assert.equal(Scheduler.pendingEndVerb('stop', run), null);
+  assert.equal(Scheduler.pendingEndVerb({ verb: 'stop' }, run), null);
+  assert.equal(Scheduler.pendingEndVerb({ startedAt: ts(0, 18, 0) }, run), null);
+  assert.equal(Scheduler.pendingEndVerb({ verb: 'end', startedAt: ts(0, 18, 0) }, run), null);
+  assert.equal(Scheduler.pendingEndVerb(null, run), null);
+  assert.equal(Scheduler.pendingEndVerb({ verb: 'stop', startedAt: ts(0, 18, 0) }, { startedAt: null }), null);
+  assert.equal(Scheduler.pendingEndVerb({ verb: 'stop', startedAt: ts(0, 18, 0) }, null), null);
+});
+
+test('pendingEndVerb: the stop-then-start sequence never ends the new run', () => {
+  // The whole defect in one sentence: a Stop parked behind a relist in hand,
+  // then a Start. The parked marker names the run that was in flight; the new
+  // run has a startedAt of its own and is untouched by it.
+  const runA = Scheduler.transition(Scheduler.deserialize(null), {
+    type: 'start',
+    defn: defn(),
+    now: ts(0, 18, 0),
+  });
+  const parked = { verb: 'stop', startedAt: runA.startedAt };
+  const runB = Scheduler.transition(runA, { type: 'start', defn: defn(), now: ts(0, 18, 5) });
+  assert.notEqual(runA.startedAt, runB.startedAt);
+  assert.equal(Scheduler.pendingEndVerb(parked, runA), 'stop');
+  assert.equal(Scheduler.pendingEndVerb(parked, runB), null);
+});
+
+// --- the scope the definition carries -------------------------------------
+
+test('scopeSelection: the definition\'s own list is the scope, whole period', () => {
+  // The ids the seller ticked at Start travel in the definition; the live
+  // checkboxes are not in the story at all.
+  const picked = defn({ scope: 'selected', selectedIds: ['b', 'd'] });
+  assert.deepEqual([...Scheduler.scopeSelection(picked)], ['b', 'd']);
+  // Ids are strings end to end, whatever arrived.
+  assert.deepEqual(
+    [...Scheduler.scopeSelection(defn({ scope: 'selected', selectedIds: [7, '9'] }))],
+    ['7', '9'],
+  );
+  // Under 'all' the list is never consulted.
+  assert.equal(Scheduler.scopeSelection(defn({ scope: 'all', selectedIds: ['b'] })).size, 0);
+  // With no list at all the scope is empty and stays empty.
+  assert.equal(Scheduler.scopeSelection(defn({ scope: 'selected' })).size, 0);
+  assert.equal(Scheduler.scopeSelection(defn({ scope: 'selected', selectedIds: 'oops' })).size, 0);
+  assert.equal(Scheduler.scopeSelection(null).size, 0);
+});
+
+test('pickNext: confined to the definition\'s captured ids for the whole period', () => {
+  const d = defn({ scope: 'selected', selectedIds: ['b'] });
+  const items = [
+    { id: 'a', ageDays: 30, closed: false },
+    { id: 'b', ageDays: 30, closed: false },
+    { id: 'c', ageDays: 30, closed: false },
+  ];
+  // The Set is built off the definition — a wardrobe wiped clean by a reload
+  // cannot empty it — and the run touches each id once.
+  assert.equal(Scheduler.pickNext(items, d, Scheduler.scopeSelection(d), new Set()), 'b');
+  assert.equal(Scheduler.pickNext(items, d, Scheduler.scopeSelection(d), new Set(['b'])), null);
+});

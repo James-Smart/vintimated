@@ -62,10 +62,10 @@ One form, every knob:
 | Period — Ends | The date the run stops. It starts the moment you press **Start schedule** and runs to the end of the date you pick. | A week from today |
 | Days | Which weekdays it may relist on. At least one must be on or the form refuses to start. | Every day |
 | Hours | The one window of the day it may relist in. A same-day window only: the form refuses one that ends before it starts (overnight) or one that is empty. | 18:00–21:00 |
-| Max relists per day | The day's cap. It counts manual relists too — every relist is written to one log, whichever button made it. | 6 |
+| Max relists per day | The day's cap — the calendar day, since midnight, not a rolling 24 hours. It counts manual relists too — every relist is written to one log, whichever button made it. | 6 |
 | Gap between relists | How long it waits after one relist before the next — a random gap drawn between these two bounds each time. | 35–90 min |
 | Item age | Only items listed this many days ago or more are touched. The threshold doubles as the cadence: a relist makes a listing brand new again, so the same item cannot come back round inside it. | 10+ days |
-| Which items | All your active items, or only what you ticked in the wardrobe. | All my active items |
+| Which items | All your active items, or only what you ticked in the wardrobe — the ticks are taken when you press **Start** and kept for the whole run, so a page reload cannot lose them. Starting with nothing ticked is refused. | All my active items |
 
 **Stop** and **Abort** are the two answers to a run in being. Stop is polite:
 the schedule ends after the relist in progress, and nothing new starts. Abort
@@ -76,8 +76,10 @@ still covered by copy-before-delete and the recovery banner.
 While a run is live, the bar at the foot of your wardrobe page carries the
 running strip:
 `Schedule running · next relist in ~N min · k of cap today · ends <date>`,
-or `paused until <time>` while the stand-down Vinted asked for is still
-standing.
+`paused until <time>` while the stand-down Vinted asked for is still
+standing, or `outside hours · next window <time>` when the shop is shut —
+the countdown is always the next relist's real moment, so a night outside
+the hours never reads "~1 min".
 
 The honest parts:
 
@@ -97,9 +99,11 @@ The honest parts:
   photos and the pacing defaults are all the ones a manual relist uses.
 - **The engine tab.** The scheduler keeps its own wardrobe tab as its engine
   — it opens one quietly in the background if you have none, or borrows one
-  you already have open. It only ever closes tabs it opened itself, so an
-  engine tab of its own is harmless to close by hand: nothing is lost, and
-  the next wake simply opens another.
+  of your own you already have open. Another member's page is never used:
+  the run only ever works the wardrobe the extension remembers as yours. It
+  only ever closes tabs it opened itself, so an engine tab of its own is
+  harmless to close by hand: nothing is lost, and the next wake simply opens
+  another.
 
 ## Photo refresh
 
