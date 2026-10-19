@@ -41,12 +41,13 @@ distributed under the same license.
   backlog, and a browser that was shut for two days simply missed those two
   days.
 - **Scheduled runs never prompt.** A scheduled firing raises no windows at
-  all. A size question is deferred to the recovery banner — **Retry now** is
-  what asks it, when somebody is there to answer — and a firing that would
-  carry the tally past the volume alarms (four an hour, fifteen a day) holds
-  and skips to the next slot rather than asking. The counts come off the one
-  relist log, so manual relists count against the day's cap exactly like
-  scheduled ones.
+  all. A size question raised before anything is touched simply cancels the
+  firing and leaves the item as it is; one that only surfaces after the
+  delete is deferred to the recovery banner — **Retry now** is what asks it,
+  when somebody is there to answer. A firing that would carry the tally past
+  the volume alarms (four an hour, fifteen a day) holds and skips to the next
+  slot rather than asking. The counts come off the one relist log, so manual
+  relists count against the day's cap exactly like scheduled ones.
 - **Stop, Abort and the running strip.** *Stop* ends the period after the
   relist in progress; *Abort* cancels at once, behind a *Confirm abort* click,
   with copy-before-delete and the recovery banner still covering whatever was

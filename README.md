@@ -82,10 +82,12 @@ standing.
 The honest parts:
 
 - **It never prompts.** A scheduled firing raises no dialogs, ever. A size
-  question is deferred to the recovery banner — **Retry now** is what asks,
-  when you are there to answer — and a firing that would cross the volume
-  alarms (4 an hour, 15 a day, counting your manual relists) waits for the
-  next slot instead of asking.
+  question raised before anything is touched simply cancels the firing and
+  leaves the item as it is; one that only surfaces after the delete is
+  deferred to the recovery banner — **Retry now** is what asks, when you are
+  there to answer — and a firing that would cross the volume alarms (4 an
+  hour, 15 a day, counting your manual relists) waits for the next slot
+  instead of asking.
 - **It pauses when Vinted pushes back.** A 429 or a challenge stands the
   schedule down exactly as it stands everything else down; the strip reads
   `paused until <time>`, and the run resumes inside its own windows when the
