@@ -780,6 +780,164 @@ body {
 @media (prefers-color-scheme: dark) {
   .switch__select { background: transparent; }
 }
+
+/* --- the schedule form ---------------------------------------------------- */
+
+/* Knob rows, in the switch row's shape — words on the left, the control at the
+   end of the row — but the controls here are values rather than states: a
+   date, a pair of clock times, three counts. Each label names its control
+   with `for`, so the row reads as one sentence and a screen reader hears the
+   sentence rather than a bare edit box. */
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* The group heading above already says the subject; its own 12px below is
+   what the rows then take from each other. */
+.setting__group + .field,
+.setting__group + .days,
+.setting__group + .choice { margin-top: 0; }
+
+.field__label {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4285;
+}
+
+/* The one line of the form that is not a control: "Starts: when I press
+   Start", in the muted ink, because it tells rather than asks. */
+.field--note .field__label {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+
+.field__pair {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The unit and the aside ride in the row as words, quieter than the label
+   they hang off: "min" names what the numbers are counted in, and "(random)"
+   says the gap is drawn rather than fixed. */
+.field__hint,
+.field__tail {
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+/* Same tokens as .switch__select, so every control in the panel is one
+   look — the panel's own border and background, not a browser-default box. */
+.field__input {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+}
+
+.field__input:hover { background: var(--muted); }
+.field__input:focus-visible { border-color: var(--ring); }
+
+/* Wide enough for the format each one carries — 18:00, 35, 2026-10-25 — and
+   no wider, so the label keeps its share of the row. */
+.field__input[type="number"] { width: 58px; }
+.field__input[type="time"] { width: 102px; }
+.field__input[type="date"] { width: 132px; }
+
+@media (prefers-color-scheme: dark) {
+  .field__input { background: transparent; }
+}
+
+/* The seven day toggles. One row of equal chips, Monday to Sunday: seven
+   checkboxes in a list would be seven rows for one question. The boxes are
+   real and keep their place in the tab order; they are simply not drawn —
+   the chip around each one is the toggle's whole look, and being filled in
+   is the state it reports. */
+.days {
+  display: flex;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.day {
+  position: relative;
+  flex: 1;
+  padding: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.day input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.day:has(input:checked) {
+  background: var(--muted);
+  border-color: var(--ring);
+  font-weight: 500;
+}
+
+.day:has(input:focus-visible) { border-color: var(--ring); }
+
+/* Scope: two named answers, each its own line, because the second one narrows
+   the run to what the seller ticked and is worth reading in full. */
+.choice {
+  margin-top: 12px;
+}
+
+.choice__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.choice__row + .choice__row { margin-top: 8px; }
+
+.choice__row input {
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+/* Start first and on its own terms; Stop and Abort join it only while a run
+   is live. Stacked and full width, the panel's own answer for more than one
+   button in a column this narrow — the same shape as the risk gate's. */
+.schedule__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.schedule__actions .button {
+  height: 36px;
+  margin: 0;
+}
+
+/* Abort as it is asking, rather than as it is offering: the second click is
+   the one that ends the run outright, and the destructive ink says so before
+   the label is read twice. */
+.button.is-armed {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
 /* --- the risk gate ------------------------------------------------------ */
 
 /* Two buttons side by side, and the safe one first: the reading order is the

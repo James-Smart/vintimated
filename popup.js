@@ -911,6 +911,252 @@ function wirePower(stored, tab, repaint, notePage) {
   });
 }
 
+// --- the schedule ----------------------------------------------------------
+
+// The books the form writes to, always through the worker's one door rather
+// than straight at storage: every verb — start, stop, abort, status — answers
+// { state, defn, tabId }, and that answer is what the panel redraws from. A
+// worker that cannot be reached is not a schedule to invent out of it: the
+// form simply keeps showing what it is showing.
+const SCHEDULE_KEY = 'vintimated:schedule';
+
+// Abort is answered twice or not at all: the first click only turns the
+// label into the question, and four seconds of silence is long enough to
+// decide against one but short enough that the offer has to be renewed.
+const ABORT_CONFIRM_MS = 4000;
+
+async function askSchedule(message) {
+  try {
+    const reply = await Promise.resolve(ext.runtime.sendMessage(message));
+    return reply && reply.state ? reply : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+const pad2 = n => String(n).padStart(2, '0');
+
+// 'HH:MM' out of the clock controls and minutes of the local day out of that —
+// the same local clock the schedule's windows are drawn in.
+function minutesOf(value, fallback) {
+  const found = /^(\d{1,2}):(\d{2})/.exec(value || '');
+  if (!found) return fallback;
+  const minutes = Number(found[1]) * 60 + Number(found[2]);
+  return minutes >= 0 && minutes < 24 * 60 ? minutes : fallback;
+}
+
+const hhmmOf = minutes => `${pad2(Math.floor(minutes / 60))}:${pad2(minutes % 60)}`;
+
+// The calendar's own 'YYYY-MM-DD', of a moment in the seller's own time zone.
+const dateValueOf = at => {
+  const d = new Date(at);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+};
+
+// What the Ends control becomes the moment Start is pressed: that date at its
+// local 23:59. A control left empty is the default week rather than a period
+// that ended in 1970.
+function endsAtOf(value) {
+  const found = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+  const when = found
+    ? new Date(Number(found[1]), Number(found[2]) - 1, Number(found[3]), 23, 59)
+    : (() => {
+        const d = new Date();
+        d.setDate(d.getDate() + 7);
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59);
+      })();
+  return when.getTime();
+}
+
+// The default period: a week from today, held in the Ends control as the
+// calendar date it is. The moment it becomes is worked out at Start.
+function defaultEnds() {
+  const d = new Date();
+  d.setDate(d.getDate() + 7);
+  return dateValueOf(d.getTime());
+}
+
+// The seven toggles in the order the definition counts them: 0–6, Sunday at 0.
+const SCHEDULE_DAYS = [0, 1, 2, 3, 4, 5, 6];
+
+// The form, read whole, and the one place the definition is built. Every
+// field Scheduler.decide asks about is here and nothing else — days as 0–6,
+// the hours as local minutes of the day, the two gaps and the period in
+// milliseconds. Both halves of the period travel with the start, and they are
+// not the same fact twice: defn.endsAt is the moment decide() checks the
+// clock against, while defn.periodMs is what transition() draws the run's own
+// endsAt from. A gap entered upside down is read the right way up rather than
+// left to draw negative waits.
+function readScheduleForm() {
+  const number = (id, fallback) => {
+    const parsed = parseInt(document.getElementById(id).value, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  let gapMin = Math.max(1, number('sched-gap-min', 35));
+  let gapMax = Math.max(1, number('sched-gap-max', 90));
+  if (gapMin > gapMax) [gapMin, gapMax] = [gapMax, gapMin];
+
+  const endsAt = endsAtOf(document.getElementById('sched-ends').value);
+  return {
+    days: SCHEDULE_DAYS.filter(d => document.getElementById(`sched-day-${d}`).checked),
+    fromMin: minutesOf(document.getElementById('sched-from').value, 1080),
+    toMin: minutesOf(document.getElementById('sched-to').value, 1260),
+    endsAt,
+    gapMinMs: gapMin * 60000,
+    gapMaxMs: gapMax * 60000,
+    maxPerDay: Math.max(1, number('sched-max', 6)),
+    ageThresholdDays: Math.max(0, number('sched-age', 10)),
+    scope: document.getElementById('sched-scope-selected').checked ? 'selected' : 'all',
+    periodMs: Math.max(0, endsAt - Date.now()),
+  };
+}
+
+// The form, written back from a run's definition. A schedule that is running
+// — or one that ended, or was cancelled, all of which keep their settings —
+// comes back up with every knob where it was left, so Start means "again, as
+// it was". Anything the definition does not carry leaves its control alone.
+function fillScheduleForm(defn) {
+  if (!defn || typeof defn !== 'object') return;
+  for (const d of SCHEDULE_DAYS) {
+    document.getElementById(`sched-day-${d}`).checked =
+      Array.isArray(defn.days) && defn.days.includes(d);
+  }
+  if (Number.isFinite(defn.fromMin)) {
+    document.getElementById('sched-from').value = hhmmOf(defn.fromMin);
+  }
+  if (Number.isFinite(defn.toMin)) {
+    document.getElementById('sched-to').value = hhmmOf(defn.toMin);
+  }
+  if (Number.isFinite(defn.endsAt) && defn.endsAt > 0) {
+    document.getElementById('sched-ends').value = dateValueOf(defn.endsAt);
+  }
+  if (Number.isFinite(defn.gapMinMs)) {
+    document.getElementById('sched-gap-min').value = String(Math.round(defn.gapMinMs / 60000));
+  }
+  if (Number.isFinite(defn.gapMaxMs)) {
+    document.getElementById('sched-gap-max').value = String(Math.round(defn.gapMaxMs / 60000));
+  }
+  if (Number.isFinite(defn.maxPerDay)) {
+    document.getElementById('sched-max').value = String(defn.maxPerDay);
+  }
+  if (Number.isFinite(defn.ageThresholdDays)) {
+    document.getElementById('sched-age').value = String(defn.ageThresholdDays);
+  }
+  document.getElementById(defn.scope === 'selected' ? 'sched-scope-selected' : 'sched-scope-all')
+    .checked = true;
+}
+
+// The panel, wired once. Start sends the whole definition and takes the books
+// back as its answer; Stop and Abort are answers to a run in being only. The
+// repaint handle is handed out because the one thing here the catalogue does
+// not draw — Abort's two-state label — has to be drawn again on a language
+// change.
+function wireSchedule() {
+  const start = document.getElementById('sched-start');
+  const stop = document.getElementById('sched-stop');
+  const abort = document.getElementById('sched-abort');
+
+  // The validated default, in the control from the first paint: a week today.
+  // The async fill below may replace it with a running run's own date, which
+  // is the only thing that should.
+  document.getElementById('sched-ends').value = defaultEnds();
+
+  // The books the panel is currently drawn from. Kept so the buttons can be
+  // drawn again — after a language change, or when storage says the run has
+  // moved on under an open panel.
+  let current = null;
+
+  // Abort's label is the question as well as the button. data-i18n travels
+  // with the state, so a language change repaints whichever one is showing.
+  const disarmAbort = () => {
+    abort.dataset.i18n = 'schedule.abort';
+    abort.textContent = VintimatedText.t('schedule.abort');
+    abort.classList.remove('is-armed');
+  };
+
+  let armed = false;
+  let armTimer = null;
+
+  const render = () => {
+    const running = current != null && current.status === 'running';
+    stop.hidden = !running;
+    abort.hidden = !running;
+    // A run that has moved on leaves no stale question standing: whatever the
+    // buttons are redrawn for, they go back to offering rather than asking.
+    armed = false;
+    clearTimeout(armTimer);
+    disarmAbort();
+  };
+
+  start.addEventListener('click', async () => {
+    const answer = await askSchedule({ type: 'vintimated:schedule.start', defn: readScheduleForm() });
+    if (!answer) return;
+    current = answer.state;
+    if (answer.defn) fillScheduleForm(answer.defn);
+    render();
+  });
+
+  stop.addEventListener('click', async () => {
+    // Polite: the relist in hand finishes and the run ends after it — the
+    // books go on saying 'running' until then, so the panel does too.
+    const answer = await askSchedule({ type: 'vintimated:schedule.stop' });
+    if (!answer) return;
+    current = answer.state;
+    render();
+  });
+
+  abort.addEventListener('click', async () => {
+    if (!armed) {
+      armed = true;
+      abort.dataset.i18n = 'schedule.abort.confirm';
+      abort.textContent = VintimatedText.t('schedule.abort.confirm');
+      abort.classList.add('is-armed');
+      armTimer = setTimeout(() => {
+        armed = false;
+        disarmAbort();
+      }, ABORT_CONFIRM_MS);
+      return;
+    }
+    const answer = await askSchedule({ type: 'vintimated:schedule.abort' });
+    if (!answer) return;
+    current = answer.state;
+    render();
+  });
+  // A click that moved on is not an answer: the offer goes back on blur too,
+  // not only on the timer.
+  abort.addEventListener('blur', () => {
+    armed = false;
+    clearTimeout(armTimer);
+    disarmAbort();
+  });
+
+  // On opening: the form comes back from the books whenever there are any.
+  Promise.resolve()
+    .then(() => askSchedule({ type: 'vintimated:schedule.status' }))
+    .then(answer => {
+      if (!answer) return;
+      current = answer.state;
+      if (answer.defn) fillScheduleForm(answer.defn);
+      render();
+    });
+
+  // The books move while the panel can be open — a firing, a run the strip
+  // stopped, a period that ran out — and the buttons must not go on offering
+  // to start what is already running. The knobs are the seller's to touch, so
+  // only the buttons follow storage here.
+  Promise.resolve()
+    .then(() => ext.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !changes || !(SCHEDULE_KEY in changes)) return;
+      askSchedule({ type: 'vintimated:schedule.status' }).then(answer => {
+        current = answer ? answer.state : null;
+        render();
+      });
+    }))
+    .catch(() => {});
+
+  return render;
+}
+
 async function main() {
   // version_name is what a hand-built debug package sets; without one this is
   // the plain version, exactly as before.
@@ -986,11 +1232,14 @@ async function main() {
 
   // Everything on the panel that script wrote rather than the catalogue, drawn
   // from the top. paintTab covers the status card, the pending list and the
-  // action button; the other two own a card each.
+  // action button; the other two own a card each, and the schedule's buttons
+  // are its own third.
+  const paintSchedule = wireSchedule();
   const repaintAll = () => {
     paintTab();
     renderPause(stored);
     renderVolume(stored);
+    paintSchedule();
   };
 
   wirePower(stored, tab, paintTab, fresh => { page = fresh; });

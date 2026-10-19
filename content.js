@@ -644,6 +644,11 @@
   const clockOf = at =>
     new Date(at).toLocaleTimeString(VintimatedText.locale(), { hour: '2-digit', minute: '2-digit' });
 
+  // The date half of the same question, for the strip's "ends <date>". Same
+  // rule as the clock: the language's own calendar, not the browser's default.
+  const dayOf = at =>
+    new Date(at).toLocaleDateString(VintimatedText.locale(), { day: '2-digit', month: '2-digit' });
+
   // The one place lockedUntil changes. Also arms the timer that lifts the pause
   // without the page having to be reloaded.
   function applyLock(record) {
@@ -1158,6 +1163,22 @@
          display:none; this gives the attribute its say back. */
       .${CLASS.bulkbar}[hidden] { display: none; }
       .vintimated-bulkbar__status { color: var(--bl-muted-ink); }
+      /* The schedule's line, its own row across the bottom of the bar: the run
+         reads as a line of the bar rather than as a sixth button in the row. */
+      .vintimated-bulkbar__schedule {
+        flex-basis: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .vintimated-bulkbar__schedule-text { color: var(--bl-muted-ink); }
+      /* The bulk row stands down when the bar is up for the schedule alone.
+         Vinted's own button classes set a display of their own and would
+         outvote the attribute otherwise — the same fight the bar's own
+         [hidden] rule settles one level up. */
+      .vintimated-bulkbar [hidden] { display: none; }
       .${CLASS.select} {
         display: block;
         margin-top: 8px;
@@ -2665,6 +2686,15 @@
   // with it — "3/17 · Relisting…" — and one line answers both questions.
   let bulkProgress = '';
 
+  // The schedule's line on the bar, as paintScheduleStrip last drew it: the
+  // run's own state, and the finished sentence beside its buttons. The words
+  // are fetched out there because it costs a round trip to the worker, while
+  // paintBulkBar below runs on every mutation of the page and draws only what
+  // it is given — so a repaint is never a message and a message is never a
+  // repaint.
+  let scheduleState = null;
+  let scheduleLine = '';
+
   // Which items "all" is allowed to mean. canRelist answers this for a card
   // out of the wardrobe index; this answers it from the listing replies,
   // keying on the same three fields that decide copyability there: an item is
@@ -3093,7 +3123,40 @@
       if (bulkQueue) bulkQueue.stop();
     });
 
-    bar.append(count, status, selectLoaded, clear, picked, all, stop);
+    // The bar's schedule line, its own row under the bulk controls: what the
+    // run is, when it may relist next, what it has spent of the day, and when
+    // the period ends — with Stop and Abort beside it. Abort is the one thing
+    // a schedule cannot come back from, so it is also the one that asks twice.
+    const strip = document.createElement('div');
+    strip.className = 'vintimated-bulkbar__schedule';
+    strip.hidden = true;
+
+    const stripText = document.createElement('span');
+    stripText.className = 'vintimated-bulkbar__schedule-text';
+
+    const stripStop = buildButton(T('schedule.stop'));
+    stripStop.classList.add('vintimated-bulkbar__schedule-stop');
+    stripStop.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      // Polite, as in the popup: the relist in hand finishes first.
+      Promise.resolve()
+        .then(() => askWorker({ type: 'vintimated:schedule.stop' }))
+        .then(() => paintScheduleStrip())
+        .catch(err => trace('could not stop the schedule', err));
+    });
+
+    const stripAbort = buildButton(T('schedule.abort'));
+    stripAbort.classList.add('vintimated-bulkbar__schedule-abort');
+    armScheduleAbort(stripAbort, () =>
+      Promise.resolve()
+        .then(() => askWorker({ type: 'vintimated:schedule.abort' }))
+        .then(() => paintScheduleStrip())
+        .catch(err => trace('could not abort the schedule', err)));
+
+    strip.append(stripText, stripStop, stripAbort);
+
+    bar.append(count, status, selectLoaded, clear, picked, all, stop, strip);
     return bar;
   }
 
@@ -3113,9 +3176,27 @@
     }
 
     // Hidden while there is nothing relistable to put it to work on — except
-    // mid-walk: the per-item settle drops cards as it goes, and Stop must
-    // stay reachable for the whole walk.
-    bar.hidden = !document.querySelector(SELECTOR.ourItem) && !bulkQueue;
+    // mid-walk and while a schedule is live: the per-item settle drops cards
+    // as it goes, Stop must stay reachable for the whole walk, and the run's
+    // own line is this bar's business whatever the page below it shows.
+    const bulkable = Boolean(document.querySelector(SELECTOR.ourItem)) || Boolean(bulkQueue);
+    bar.hidden = !bulkable && !scheduleState;
+
+    // Up for the schedule alone, the bar is only the schedule's line: the
+    // bulk controls and the count stand down with it rather than offering to
+    // bulk-relist a wardrobe that has nothing on screen to offer.
+    for (const name of ['count', 'status', 'select', 'clear', 'picked', 'all', 'stop']) {
+      const control = bar.querySelector(`.vintimated-bulkbar__${name}`);
+      if (control) control.hidden = !bulkable;
+    }
+
+    // The schedule line itself. Its words are written by paintScheduleStrip,
+    // which asks the worker for them; this pass only draws what it was last
+    // given, and only when it differs.
+    const strip = bar.querySelector('.vintimated-bulkbar__schedule');
+    if (strip) strip.hidden = !scheduleState;
+    const stripText = bar.querySelector('.vintimated-bulkbar__schedule-text');
+    if (stripText && stripText.textContent !== scheduleLine) stripText.textContent = scheduleLine;
 
     // Text is written only when it changes. attachButtons runs on every
     // mutation of the page and this repaints from it, so a write of the same
@@ -3421,8 +3502,105 @@
   ext.runtime.onMessage.addListener(message => {
     if (!message || message.type !== 'vintimated:schedule.wake') return false;
     runEngine();
+    // The knock is also the strip's own clock: while a run waits out its gap
+    // or its window, this is what moves the countdown on, minute by minute.
+    paintScheduleStrip();
     return false;
   });
+
+  // --- the running strip ----------------------------------------------------
+  //
+  // The bar's schedule line, and the only chrome a running schedule has: what
+  // the run is, when it may relist next, what it has spent of the day the
+  // form promised, and when the period ends. It lives on the bulk bar because
+  // that is where the seller already looks to see this wardrobe being worked,
+  // and it stands alone there when the page has nothing to bulk-relist.
+  //
+  // The countdown is nextDueAt — the gap the run itself is holding — and a
+  // stand-down from Vinted takes its place, read the way the buttons' own
+  // greying reads it: the block record the pause machinery writes, not a
+  // second opinion of this file's own.
+
+  // Abort's two clicks, the same bargain the popup's button strikes: the
+  // first only turns the label into the question and the second answers it.
+  // Four seconds of quiet — or a click that moves on elsewhere — takes the
+  // question back off, so the offer never sits armed on the page.
+  const ABORT_CONFIRM_MS = 4000;
+
+  function armScheduleAbort(button, act) {
+    let armed = false;
+    let timer = null;
+    const disarm = () => {
+      armed = false;
+      clearTimeout(timer);
+      setButtonLabel(button, T('schedule.abort'));
+    };
+    button.addEventListener('blur', disarm);
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!armed) {
+        armed = true;
+        setButtonLabel(button, T('schedule.abort.confirm'));
+        timer = setTimeout(disarm, ABORT_CONFIRM_MS);
+        return;
+      }
+      disarm();
+      Promise.resolve()
+        .then(act)
+        .catch(err => trace('could not abort the schedule', err));
+    });
+  }
+
+  // The one place the strip's words are written. Called when something might
+  // have changed them — a knock, a firing, a manual relist, a pause landing
+  // or lifting, the run ending — and never from the mutation observer: each
+  // call is a round trip to the worker and paintBulkBar draws the result.
+  async function paintScheduleStrip() {
+    if (enabled !== true) {
+      scheduleState = null;
+      scheduleLine = '';
+      return;
+    }
+    try {
+      const { state, defn } = await askWorker({ type: 'vintimated:schedule.status' });
+      if (!state || state.status !== 'running' || !defn) {
+        // No run in being, no strip: the form in the popup is where a
+        // schedule is started and its Start is the only button that matters.
+        scheduleState = null;
+        scheduleLine = '';
+        paintBulkBar();
+        return;
+      }
+      scheduleState = state;
+
+      const parts = [T('schedule.strip.running')];
+      const block = await readBlock();
+      if (block && block.until > Date.now()) {
+        parts.push(T('schedule.strip.paused', clockOf(block.until)));
+      } else if (state.nextDueAt != null) {
+        const mins = Math.max(1, Math.round((state.nextDueAt - Date.now()) / 60000));
+        parts.push(T('schedule.strip.next', mins));
+      }
+      // The day's count is the shared relist log's, not the run's own
+      // dayCount: a manual relist spends exactly the same cap, and what the
+      // form promised was the account's day, not the schedule's bookkeeping.
+      parts.push(T(
+        'schedule.strip.count',
+        countWithin(await relistLog(), DAY_WINDOW_MS),
+        defn.maxPerDay,
+      ));
+      // state.endsAt is the period transition drew from periodMs; defn.endsAt
+      // is the same moment decide() checks the clock against. Either is the
+      // date the seller was promised.
+      const endsAt = state.endsAt ?? defn.endsAt;
+      if (endsAt) parts.push(T('schedule.strip.ends', dayOf(endsAt)));
+      scheduleLine = parts.join(' · ');
+      paintBulkBar();
+    } catch (err) {
+      trace('could not paint the schedule strip', err);
+    }
+  }
 
   // ===========================================================================
   // Wiring the buttons into the page
@@ -3523,6 +3701,13 @@
     if (ENABLED_KEY in changes) applyEnabled(changes[ENABLED_KEY].newValue !== false);
     if (LANG_KEY in changes) applyLanguage(changes[LANG_KEY].newValue || 'auto');
     if (BLOCK_KEY in changes) applyLock(changes[BLOCK_KEY].newValue);
+    // The strip follows whatever its line reports: the books (a start, a
+    // firing, a stop), the shared log (a relist of any kind, which is what
+    // the day's count is taken from), the stand-down, and the switch itself.
+    if (SCHEDULE_KEY in changes || RELIST_LOG_KEY in changes ||
+        BLOCK_KEY in changes || ENABLED_KEY in changes) {
+      paintScheduleStrip();
+    }
   });
 
   readBlock()
@@ -3545,5 +3730,8 @@
   readEnabled().then(on => {
     applyEnabled(on);
     runEngine();
+    // And the strip is drawn with the rest: a run in being says so from the
+    // first moment the bar is up, not from the first knock.
+    paintScheduleStrip();
   });
 })();

@@ -108,6 +108,46 @@ const VintimatedText = (() => {
       'bulk.confirmAll': 'Relist all {0} items now? Each one is deleted and put back online, with its photos refreshed. Nothing is deleted until a full copy is saved on this device.',
       'bulk.fallback': 'Could not read the whole wardrobe from Vinted. Relisting what is on this page instead.',
 
+      // The schedule: the one-form setup panel in the popup, the running strip
+      // on the wardrobe bar, and the two endings. Written in English alone for
+      // now — t() reads any missing key across from here. The labels and
+      // defaults are the ones the seller validated; the bold value in the
+      // notes is the control's own starting value.
+      'schedule.form.title': 'Schedule',
+      'schedule.form.group.period': 'Period',
+      'schedule.form.starts': 'Starts: when I press Start',
+      'schedule.form.ends': 'Ends',
+      'schedule.form.group.when': 'When it may relist',
+      'schedule.form.day.mon': 'Mon',
+      'schedule.form.day.tue': 'Tue',
+      'schedule.form.day.wed': 'Wed',
+      'schedule.form.day.thu': 'Thu',
+      'schedule.form.day.fri': 'Fri',
+      'schedule.form.day.sat': 'Sat',
+      'schedule.form.day.sun': 'Sun',
+      'schedule.form.hours': 'Hours',
+      'schedule.form.maxPerDay': 'Max relists per day:',
+      'schedule.form.group.pace': 'Pace',
+      'schedule.form.gap': 'Gap between relists:',
+      'schedule.form.gapUnit': 'min',
+      'schedule.form.gapRandom': '(random)',
+      'schedule.form.group.items': 'Which items',
+      'schedule.form.age': 'Only items listed',
+      'schedule.form.ageSuffix': '+ days ago',
+      'schedule.form.scope.all': 'All my active items',
+      'schedule.form.scope.selected': 'Only what I ticked in the wardrobe',
+      'schedule.form.start': 'Start schedule',
+      'schedule.stop': 'Stop',
+      'schedule.abort': 'Abort',
+      'schedule.abort.confirm': 'Confirm abort',
+      // The strip's line, joined with " · ": running · countdown · count · ends.
+      // A stand-down from Vinted takes the countdown's place.
+      'schedule.strip.running': 'Schedule running',
+      'schedule.strip.next': 'next relist in ~{0} min',
+      'schedule.strip.count': '{0} of {1} today',
+      'schedule.strip.ends': 'ends {0}',
+      'schedule.strip.paused': 'paused until {0}',
+
       // What stops a relist, in Bumpline's own words. Vinted's words are never
       // in here: a refusal it sent is quoted as it arrived, in whatever
       // language it arrived in, and only the sentence around it is ours.

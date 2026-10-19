@@ -130,6 +130,111 @@
     <p class="card__note" id="volume-detail"></p>
   </section>
 
+  <!-- The schedule: one form, every knob visible, and the buttons that answer
+       it. The knobs are the ones the seller validated, at their validated
+       defaults — a week, all seven days, 18:00–21:00, six a day, a 35–90
+       minute gap, ten days old — and every value is an ordinary control, so
+       what is running is what the panel is showing. Start begins the period
+       from the click and sends the whole definition at once; Stop ends it
+       after the relist in progress and Abort cancels at once, which is why
+       Abort is the button that asks twice. -->
+  <section class="card" id="schedule">
+    <h2 class="card__title">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 2v4"/><path d="M16 2v4"/>
+        <rect width="18" height="18" x="3" y="4" rx="2"/>
+        <path d="M3 10h18"/>
+      </svg>
+      <span data-i18n="schedule.form.title">Schedule</span>
+    </h2>
+
+    <div class="setting">
+      <p class="setting__group" data-i18n="schedule.form.group.period">Period</p>
+
+      <!-- Not a control, and said rather than left to be guessed: the period
+           opens on the click, so there is no start date to fill in and no
+           reading when the walk began beyond "when I press Start". -->
+      <p class="field field--note">
+        <span class="field__label" data-i18n="schedule.form.starts">Starts: when I press Start</span>
+      </p>
+      <div class="field">
+        <label class="field__label" for="sched-ends" data-i18n="schedule.form.ends">Ends</label>
+        <input class="field__input" type="date" id="sched-ends">
+      </div>
+
+      <p class="setting__group" data-i18n="schedule.form.group.when">When it may relist</p>
+
+      <!-- Seven toggles, Monday first because that is how a week is read, and
+           Sunday last because it is numbered 0 in the definition. -->
+      <div class="days">
+        <label class="day"><input type="checkbox" id="sched-day-1" checked><span data-i18n="schedule.form.day.mon">Mon</span></label>
+        <label class="day"><input type="checkbox" id="sched-day-2" checked><span data-i18n="schedule.form.day.tue">Tue</span></label>
+        <label class="day"><input type="checkbox" id="sched-day-3" checked><span data-i18n="schedule.form.day.wed">Wed</span></label>
+        <label class="day"><input type="checkbox" id="sched-day-4" checked><span data-i18n="schedule.form.day.thu">Thu</span></label>
+        <label class="day"><input type="checkbox" id="sched-day-5" checked><span data-i18n="schedule.form.day.fri">Fri</span></label>
+        <label class="day"><input type="checkbox" id="sched-day-6" checked><span data-i18n="schedule.form.day.sat">Sat</span></label>
+        <label class="day"><input type="checkbox" id="sched-day-0" checked><span data-i18n="schedule.form.day.sun">Sun</span></label>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="sched-from" id="sched-hours-label" data-i18n="schedule.form.hours">Hours</label>
+        <span class="field__pair">
+          <input class="field__input" type="time" id="sched-from" value="18:00">
+          <span aria-hidden="true">–</span>
+          <input class="field__input" type="time" id="sched-to" value="21:00" aria-labelledby="sched-hours-label">
+        </span>
+      </div>
+      <div class="field">
+        <label class="field__label" for="sched-max" data-i18n="schedule.form.maxPerDay">Max relists per day:</label>
+        <input class="field__input" type="number" id="sched-max" min="1" value="6">
+      </div>
+
+      <p class="setting__group" data-i18n="schedule.form.group.pace">Pace</p>
+
+      <div class="field">
+        <label class="field__label" for="sched-gap-min" id="sched-gap-label" data-i18n="schedule.form.gap">Gap between relists:</label>
+        <span class="field__pair">
+          <input class="field__input" type="number" id="sched-gap-min" min="1" value="35">
+          <span aria-hidden="true">–</span>
+          <input class="field__input" type="number" id="sched-gap-max" min="1" value="90" aria-labelledby="sched-gap-label">
+          <span data-i18n="schedule.form.gapUnit">min</span>
+        </span>
+        <span class="field__hint" data-i18n="schedule.form.gapRandom">(random)</span>
+      </div>
+
+      <p class="setting__group" data-i18n="schedule.form.group.items">Which items</p>
+
+      <div class="field">
+        <label class="field__label" for="sched-age" data-i18n="schedule.form.age">Only items listed</label>
+        <input class="field__input" type="number" id="sched-age" min="0" value="10">
+        <span class="field__tail" data-i18n="schedule.form.ageSuffix">+ days ago</span>
+      </div>
+      <!-- Two named answers rather than a switch: the second one changes which
+           items the run may touch, and it is worth being read in full. -->
+      <div class="choice">
+        <label class="choice__row">
+          <input type="radio" name="sched-scope" id="sched-scope-all" value="all" checked>
+          <span data-i18n="schedule.form.scope.all">All my active items</span>
+        </label>
+        <label class="choice__row">
+          <input type="radio" name="sched-scope" id="sched-scope-selected" value="selected">
+          <span data-i18n="schedule.form.scope.selected">Only what I ticked in the wardrobe</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Start stays on the panel while a run is live: pressing it begins the
+         clean run the state machine defines — the period from now, the count
+         back to zero. Stop and Abort are answers to a run in being only, and
+         Abort is the one thing that cannot be taken back, so its label turns
+         into the question on the first click and only the second answers it. -->
+    <div class="schedule__actions">
+      <button class="button" id="sched-start" type="button" data-i18n="schedule.form.start">Start schedule</button>
+      <button class="button button--quiet" id="sched-stop" type="button" data-i18n="schedule.stop" hidden>Stop</button>
+      <button class="button button--quiet" id="sched-abort" type="button" data-i18n="schedule.abort" hidden>Abort</button>
+    </div>
+  </section>
+
   <!-- Every switch here is on by default and every label says what it does at
        its own number, so the row reads the same way in all three: on is the
        cautious position and the hint says what off costs. The two that raise
