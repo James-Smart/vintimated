@@ -16,6 +16,9 @@ Vintimated is a browser extension for Vinted sellers:
 - **Photo refresh**: the photos a relist uploads are not the bytes that came
   down — each one is invisibly transformed on the way up, so a relisted item
   does not read to Vinted as the same listing twice.
+- **Schedule mode**: tell the popup the days, the hours and the pace you want,
+  and Vintimated relists qualifying items over a period while you browse —
+  quietly, one at a time, and only while your browser is open.
 
 ## Bulk relist
 
@@ -41,6 +44,60 @@ dialog appears; that is the only other question asked for the whole walk.
 A Vinted refusal mid-run — a 429 or a bot challenge — halts the queue
 immediately, with the items not yet relisted left untouched. When the run
 ends, the page reloads once if the "Reload the page" setting is on.
+
+## Schedule mode
+
+The **Schedule** panel in the popup turns the bulk walk into a routine:
+relists qualifying items for you over a period, on the days and in the hours
+you choose, while you go on browsing. The scheduler keeps its own quiet
+wardrobe tab as its engine, woken by a once-a-minute knock, so nothing runs
+when your browser is shut — and nothing catches up afterwards. One wake is at
+most one relist, never a backlog: a browser that was closed for two days
+simply missed those two days.
+
+One form, every knob:
+
+| Knob | What it does | Default |
+| --- | --- | --- |
+| Period — Ends | The date the run stops. It starts the moment you press **Start schedule** and runs to the end of the date you pick. | A week from today |
+| Days | Which weekdays it may relist on. At least one must be on or the form refuses to start. | Every day |
+| Hours | The one window of the day it may relist in. A same-day window only: the form refuses one that ends before it starts (overnight) or one that is empty. | 18:00–21:00 |
+| Max relists per day | The day's cap. It counts manual relists too — every relist is written to one log, whichever button made it. | 6 |
+| Gap between relists | How long it waits after one relist before the next — a random gap drawn between these two bounds each time. | 35–90 min |
+| Item age | Only items listed this many days ago or more are touched. The threshold doubles as the cadence: a relist makes a listing brand new again, so the same item cannot come back round inside it. | 10+ days |
+| Which items | All your active items, or only what you ticked in the wardrobe. | All my active items |
+
+**Stop** and **Abort** are the two answers to a run in being. Stop is polite:
+the schedule ends after the relist in progress, and nothing new starts. Abort
+is hard — it cancels at once — and the button turns into *Confirm abort* on
+the first click so it cannot happen by a slip. Whatever was mid-flight is
+still covered by copy-before-delete and the recovery banner.
+
+While a run is live, the bar at the foot of your wardrobe page carries the
+running strip:
+`Schedule running · next relist in ~N min · k of cap today · ends <date>`,
+or `paused until <time>` while the stand-down Vinted asked for is still
+standing.
+
+The honest parts:
+
+- **It never prompts.** A scheduled firing raises no dialogs, ever. A size
+  question is deferred to the recovery banner — **Retry now** is what asks,
+  when you are there to answer — and a firing that would cross the volume
+  alarms (4 an hour, 15 a day, counting your manual relists) waits for the
+  next slot instead of asking.
+- **It pauses when Vinted pushes back.** A 429 or a challenge stands the
+  schedule down exactly as it stands everything else down; the strip reads
+  `paused until <time>`, and the run resumes inside its own windows when the
+  stand-down lifts.
+- **The safety story is inherited, not restated.** Copy-before-delete,
+  publishing retried onto the recovery banner, photo refresh on uploaded
+  photos and the pacing defaults are all the ones a manual relist uses.
+- **The engine tab.** The scheduler keeps its own wardrobe tab as its engine
+  — it opens one quietly in the background if you have none, or borrows one
+  you already have open. It only ever closes tabs it opened itself, so an
+  engine tab of its own is harmless to close by hand: nothing is lost, and
+  the next wake simply opens another.
 
 ## Photo refresh
 
@@ -81,7 +138,8 @@ the recovery box below.
 
 ## Staying out of trouble
 
-The safety rules of Bumpline are preserved and extended to bulk runs:
+The safety rules of Bumpline are preserved and extended to bulk runs and to
+scheduled ones:
 
 - **Nothing is deleted until a copy is held.** Before an original is removed,
   the full item — fields and the original photo bytes — is written to your
@@ -144,9 +202,10 @@ in every file that carried one, and changes are marked
 
 Automating Vinted is very likely against Vinted's terms of service. Using this
 extension can get your listings removed, your account limited, or your account
-banned. Vintimated paces its actions and stops when Vinted refuses a request,
-but none of that is permission or protection. **You are responsible for how you
-use this.**
+banned — and a schedule keeps relisting for days on end while you are not
+watching, which is more of the same risk, not less of it. Vintimated paces its
+actions and stops when Vinted refuses a request, but none of that is
+permission or protection. **You are responsible for how you use this.**
 
 ## Not affiliated with, endorsed by, or connected to Vinted
 

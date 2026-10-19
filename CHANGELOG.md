@@ -6,6 +6,57 @@ and including 1.1.4 are Bumpline's, the project Vintimated was forked from.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-10-19
+
+Schedule mode: the bulk walk keeps shop hours now. One form in the popup sets
+the period, the days and the hours it may work in, how many relists a day and
+how far apart, how old a listing must be, and which items it may touch; from
+the click of **Start schedule** a run relists qualifying items on that routine
+while you browse, and ends itself when the period runs out. Nothing runs while
+the browser is shut and nothing catches up afterwards — one knock is at most
+one relist, never a backlog — and a scheduled firing never raises a dialog, so
+nothing stops to ask a question nobody is there to answer.
+
+Vintimated is a fork of Bumpline 1.1.4 by
+[g1ampy](https://github.com/g1ampy/Bumpline), Copyright (C) 2026 g1ampy,
+licensed under the GNU General Public License v3.0. Upstream's copyright
+headers are preserved in every file that carried one; Vintimated's changes are
+marked
+`Modifications Copyright (C) 2026 Vintimated contributors.` and are
+distributed under the same license.
+
+### Added
+
+- **Schedule mode.** The popup's *Schedule* panel is one form with every knob
+  on it: *Period* (starts when you press Start, ends a week later by default),
+  *Days* (all seven on), *Hours* (18:00–21:00 — one same-day window; the form
+  refuses an overnight or an empty one), *Max relists per day* (6), *Gap
+  between relists* (35–90 minutes, drawn at random each time), *Only items
+  listed N+ days ago* (10) and the scope — all your active items, or only what
+  you ticked in the wardrobe. The age threshold doubles as the cadence: a
+  relist makes a listing brand new again, so the same item cannot come back
+  round inside it. The run keeps its own quiet wardrobe tab as its engine —
+  one it opened is its own to close and harmless to close by hand — driven by
+  a once-a-minute knock: at most one relist per knock, no decisions on a
+  backlog, and a browser that was shut for two days simply missed those two
+  days.
+- **Scheduled runs never prompt.** A scheduled firing raises no windows at
+  all. A size question is deferred to the recovery banner — **Retry now** is
+  what asks it, when somebody is there to answer — and a firing that would
+  carry the tally past the volume alarms (four an hour, fifteen a day) holds
+  and skips to the next slot rather than asking. The counts come off the one
+  relist log, so manual relists count against the day's cap exactly like
+  scheduled ones.
+- **Stop, Abort and the running strip.** *Stop* ends the period after the
+  relist in progress; *Abort* cancels at once, behind a *Confirm abort* click,
+  with copy-before-delete and the recovery banner still covering whatever was
+  mid-flight. While a run is live the wardrobe bar carries
+  `Schedule running · next relist in ~N min · k of cap today · ends <date>`,
+  or `paused until <time>` while the stand-down Vinted asked for stands. The
+  schedule inherits the whole safety story — copy before delete, retried
+  publishing, photo refresh, the pacing defaults — and comes back inside its
+  own windows when the stand-down lifts.
+
 ## [1.2.1] - 2026-10-18
 
 Nothing a seller sees says Bumpline any more. The page that opens on install
